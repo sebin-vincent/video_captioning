@@ -1,8 +1,8 @@
 import ijson
 import json
 
-input_path = '/datasets/MSRVTT-v2/current.json'
-output_path = '/datasets/MSRVTT-v2/MSRVTT_data.json'
+input_path = './datasets/MSRVTT-v2/current.json'
+output_path = './datasets/MSRVTT-v2/MSRVTT_data.json'
 
 def transform_large_json(input_path, output_path):
     videos = []
