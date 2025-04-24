@@ -16,3 +16,4 @@ pandas
 opencv-python
 tqdm
 easydict
+ijson
