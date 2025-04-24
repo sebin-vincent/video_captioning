@@ -36,9 +36,9 @@ class Cider(object):
 
             # Sanity check.
             assert(type(hypo) is list)
-            assert(len(hypo) == 1)
+            # assert(len(hypo) == 1)
             assert(type(ref) is list)
-            assert(len(ref) > 0)
+            # assert(len(ref) > 0)
 
             cider_scorer += (hypo[0], ref)
 

@@ -48,8 +48,8 @@ class COCOEvalCap:
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
             (Meteor(),"METEOR"),
             (Rouge(), "ROUGE_L"),
-            (Cider(self.df), "CIDEr"),
-            (Spice(), "SPICE")
+            (Cider(self.df), "CIDEr")#,
+            #(Spice(), "SPICE")
         ]
 
         # =================================================

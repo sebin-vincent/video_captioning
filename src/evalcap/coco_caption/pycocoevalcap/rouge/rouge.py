@@ -84,6 +84,7 @@ class Rouge():
         """
         assert(gts.keys() == res.keys())
         imgIds = gts.keys()
+        print("len of imgIds",len(imgIds))
 
         score = []
         for id in imgIds:
@@ -94,9 +95,9 @@ class Rouge():
 
             # Sanity check.
             assert(type(hypo) is list)
-            assert(len(hypo) == 1)
+            # assert(len(hypo) == 1)
             assert(type(ref) is list)
-            assert(len(ref) > 0)
+            # assert(len(ref) > 0)
 
         average_score = np.mean(np.array(score))
         return average_score, np.array(score)

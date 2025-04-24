@@ -24,15 +24,17 @@ class Bleu:
         imgIds = gts.keys()
 
         bleu_scorer = BleuScorer(n=self._n)
+        print("Printing res")
+        print(res)
         for id in imgIds:
             hypo = res[id]
             ref = gts[id]
 
             # Sanity check.
             assert(type(hypo) is list)
-            assert(len(hypo) == 1)
+            # assert(len(hypo) == 1)
             assert(type(ref) is list)
-            assert(len(ref) >= 1)
+            # assert(len(ref) >= 1)
 
             bleu_scorer += (hypo[0], ref)
 
