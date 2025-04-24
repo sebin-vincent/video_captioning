@@ -1,0 +1,403 @@
+ADD file:2a90223d9f00d31e31eff6b207c57af4b7d27276195b94bec991457a6998180c in /
+/bin/sh -c set -xe 		&& echo '#!/bin/sh' > /usr/sbin/policy-rc.d 	&& echo 'exit 101' >> /usr/sbin/policy-rc.d 	&& chmod +x /usr/sbin/policy-rc.d 		&& dpkg-divert --local --rename --add /sbin/initctl 	&& cp -a /usr/sbin/policy-rc.d /sbin/initctl 	&& sed -i 's/^exit.*/exit 0/' /sbin/initctl 		&& echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/docker-apt-speedup 		&& echo 'DPkg::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb /var/cache/apt/*.bin || true"; };' > /etc/apt/apt.conf.d/docker-clean 	&& echo 'APT::Update::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb /var/cache/apt/*.bin || true"; };' >> /etc/apt/apt.conf.d/docker-clean 	&& echo 'Dir::Cache::pkgcache ""; Dir::Cache::srcpkgcache "";' >> /etc/apt/apt.conf.d/docker-clean 		&& echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/docker-no-languages 		&& echo 'Acquire::GzipIndexes "true"; Acquire::CompressionTypes::Order:: "gz";' > /etc/apt/apt.conf.d/docker-gzip-indexes 		&& echo 'Apt::AutoRemove::SuggestsImportant "false";' > /etc/apt/apt.conf.d/docker-autoremove-suggests
+3 /bin/sh -c [ -z "$(apt-get
+4 /bin/sh -c mkdir -p /run/systemd
+5
+CMD ["/bin/bash"]
+0 B
+6
+RUN /bin/sh -c export DEBIAN_FRONTEND=noninteractive
+73.87 MB
+7
+ARG CUDA_VERSION
+0 B
+8
+ARG CUDA_DRIVER_VERSION
+0 B
+9
+ENV CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 CUDA_CACHE_DISABLE=1
+0 B
+10
+RUN |2 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 /bin/sh
+102.51 MB
+11
+COPY cudaCheck /tmp/cudaCheck # buildkit
+18.72 KB
+12
+RUN |2 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 /bin/sh
+2.69 KB
+13
+RUN |2 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 /bin/sh
+3.95 KB
+14
+RUN |2 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 /bin/sh
+131 B
+15
+COPY cudaCheck/shinit_v2 /etc/shinit_v2 # buildkit
+1.15 KB
+16
+COPY cudaCheck/startup_scripts.patch /tmp # buildkit
+394 B
+17
+COPY singularity /.singularity.d # buildkit
+424 B
+18
+RUN |2 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 /bin/sh
+1.4 KB
+19
+ENV _CUDA_COMPAT_PATH=/usr/local/cuda/compat ENV=/etc/shinit_v2 BASH_ENV=/etc/bash.bashrc NVIDIA_REQUIRE_CUDA=cuda>=9.0
+0 B
+20
+LABEL com.nvidia.volumes.needed=nvidia_driver com.nvidia.cuda.version=9.0
+0 B
+21
+ARG NCCL_VERSION
+0 B
+22
+ARG CUBLAS_VERSION
+0 B
+23
+ARG CUFFT_VERSION
+0 B
+24
+ARG CURAND_VERSION
+0 B
+25
+ARG CUSPARSE_VERSION
+0 B
+26
+ARG CUSOLVER_VERSION
+0 B
+27
+ARG NPP_VERSION
+0 B
+28
+ARG NVJPEG_VERSION
+0 B
+29
+ARG CUDNN_VERSION
+0 B
+30
+ARG TRT_VERSION
+0 B
+31
+ARG TRTOSS_VERSION
+0 B
+32
+ARG NSIGHT_SYSTEMS_VERSION
+0 B
+33
+ARG NSIGHT_COMPUTE_VERSION
+0 B
+34
+ENV NCCL_VERSION=2.8.4 CUBLAS_VERSION=11.3.1.68 CUFFT_VERSION=10.4.0.72 CURAND_VERSION=10.2.3.68
+0 B
+35
+RUN |15 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 NCCL_VERSION=2.8.4
+1.98 GB
+36
+LABEL com.nvidia.nccl.version=2.8.4 com.nvidia.cublas.version=11.3.1.68 com.nvidia.cufft.version=10.4.0.72 com.nvidia.curand.version=10.2.3.68
+0 B
+37
+ARG DALI_VERSION
+0 B
+38
+ARG DALI_BUILD
+0 B
+39
+ARG DLPROF_VERSION
+0 B
+40
+ENV DALI_VERSION=0.29.0 DALI_BUILD=1852440 DLPROF_VERSION=21.02
+0 B
+41
+ADD docs.tgz / # buildkit
+11.27 KB
+42
+RUN |18 CUDA_VERSION=11.2.0.032 CUDA_DRIVER_VERSION=460.27.04 NCCL_VERSION=2.8.4
+182 B
+43
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LD_LIBRARY_PATH=/usr/local/cuda/compat/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+0 B
+44
+COPY deviceQuery/deviceQuery /usr/local/bin/ # buildkit
+168.67 KB
+45
+COPY deviceQuery/checkSMVER.sh /usr/local/bin/ # buildkit
+728 B
+46
+RUN /bin/sh -c export DEBIAN_FRONTEND=noninteractive
+38.97 MB
+47
+COPY mellanox /opt/mellanox # buildkit
+1.06 MB
+48
+ARG MOFED_VERSION=5.1-2.3.7
+0 B
+49
+ENV MOFED_VERSION=5.1-2.3.7
+0 B
+50
+RUN |1 MOFED_VERSION=5.1-2.3.7 /bin/sh -c
+658.22 KB
+51
+ARG OPENUCX_VERSION=1.9.0
+0 B
+52
+ARG OPENMPI_VERSION=4.0.5
+0 B
+53
+ENV OPENUCX_VERSION=1.9.0 OPENMPI_VERSION=4.0.5
+0 B
+54
+RUN |3 MOFED_VERSION=5.1-2.3.7 OPENUCX_VERSION=1.9.0 OPENMPI_VERSION=4.0.5
+52.7 MB
+55
+ENV PATH=/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin
+0 B
+56
+COPY cuda-*.patch /tmp # buildkit
+507 B
+57
+RUN |3 MOFED_VERSION=5.1-2.3.7 OPENUCX_VERSION=1.9.0 OPENMPI_VERSION=4.0.5
+224.52 MB
+58
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:
+0 B
+59
+RUN /bin/sh -c wget http://sqrl.nvidia.com/dldata/sgodithi/bug3254800/cicc
+27.28 MB
+60
+ARG NVIDIA_PYTORCH_VERSION
+0 B
+61
+ARG PYTORCH_BUILD_VERSION
+0 B
+62
+ENV PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYTORCH_VERSION=1.8.0a0+52ea372 PYTORCH_BUILD_NUMBER=0 NVIDIA_PYTORCH_VERSION=21.02
+0 B
+63
+LABEL com.nvidia.pytorch.version=1.8.0a0+52ea372
+0 B
+64
+RUN |2 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 /bin/sh
+57.63 MB
+65
+RUN |2 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 /bin/sh
+36.18 MB
+66
+ENV PATH=/opt/cmake-3.14.6-Linux-x86_64/bin/:/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin
+0 B
+67
+ARG PYVER=3.8
+0 B
+68
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+523.84 MB
+69
+ENV PATH=/opt/conda/bin:/opt/cmake-3.14.6-Linux-x86_64/bin/:/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin
+0 B
+70
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+941.44 KB
+71
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+205.55 KB
+72
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+14.1 MB
+73
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+1.02 MB
+74
+WORKDIR /opt/pytorch
+0 B
+75
+COPY . . # buildkit
+162.1 MB
+76
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+62.84 MB
+77
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+44.35 MB
+78
+COPY tensorboard.patch /tmp/ # buildkit
+416 B
+79
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+6.55 KB
+80
+ENV NVM_DIR=/usr/local/nvm
+0 B
+81
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+87.18 MB
+82
+COPY jupyter_notebook_config.py /opt/conda/etc/jupyter/ # buildkit
+473 B
+83
+ENV JUPYTER_PORT=8888
+0 B
+84
+ENV TENSORBOARD_PORT=6006
+0 B
+85
+EXPOSE map[8888/tcp:{}]
+0 B
+86
+EXPOSE map[6006/tcp:{}]
+0 B
+87
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+135.37 MB
+88
+ENV TORCH_CUDA_ARCH_LIST=5.2 6.0 6.1 7.0
+0 B
+89
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+736.76 MB
+90
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+578.73 MB
+91
+ENV COCOAPI_VERSION=2.0+nv0.4.0
+0 B
+92
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+4.63 MB
+93
+COPY singularity/ /.singularity.d/ # buildkit
+1.11 KB
+94
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+28.1 MB
+95
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+120.11 KB
+96
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+256.2 MB
+97
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+1.58 MB
+98
+ENV PYTHONIOENCODING=utf-8 LC_ALL=C.UTF-8
+0 B
+99
+WORKDIR /workspace
+0 B
+100
+COPY NVREADME.md README.md # buildkit
+1.11 KB
+101
+COPY docker-examples docker-examples # buildkit
+1 KB
+102
+COPY examples examples # buildkit
+27.55 MB
+103
+COPY tutorials tutorials # buildkit
+28.73 MB
+104
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+56.28 MB
+105
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+12.01 KB
+106
+COPY nvidia_entrypoint.sh /usr/local/bin # buildkit
+2.02 KB
+107
+ENTRYPOINT ["/usr/local/bin/nvidia_entrypoint.sh"]
+0 B
+108
+COPY NVIDIA_Deep_Learning_Container_License.pdf /workspace/ # buildkit
+132.14 KB
+109
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+743.15 KB
+110
+ENV PATH=/opt/conda/bin:/opt/cmake-3.14.6-Linux-x86_64/bin/:/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin:/opt/tensorrt/bin
+0 B
+111
+RUN |3 NVIDIA_PYTORCH_VERSION=21.02 PYTORCH_BUILD_VERSION=1.8.0a0+52ea372 PYVER=3.8
+241.56 KB
+112
+ARG NVIDIA_BUILD_ID
+0 B
+113
+ENV NVIDIA_BUILD_ID=20138038
+0 B
+114
+LABEL com.nvidia.build.id=20138038
+0 B
+115
+ARG NVIDIA_BUILD_REF
+0 B
+116
+LABEL com.nvidia.build.ref=13370fb9edc64ce0a2ef561b7c9e475294cb8660
+0 B
+117
+COPY file:468cfa4478390410535b45a00782b570dd3d3c23348cb0a247d177d274372f96 in ./
+348 B
+118
+/bin/sh -c pip install -r
+1.1 GB
+119
+/bin/sh -c python -c "import
+20.53 MB
+120
+/bin/sh -c pip install git+https://github.com/epfml/sent2vec.git
+1.69 MB
+121
+/bin/sh -c pip install git+https://github.com/openai/CLIP.git
+1.33 MB
+122
+/bin/sh -c mkdir /evalcap
+14.13 KB
+123
+/bin/sh -c git clone https://github.com/LuoweiZhou/coco-caption.git
+237.91 MB
+124
+/bin/sh -c cd /evalcap/coco_caption &&
+367.2 MB
+125
+/bin/sh -c git clone https://github.com/xiaoweihu/cider.git
+86.52 MB
+126
+/bin/sh -c pip uninstall -y
+3.46 MB
+127
+/bin/sh -c pip --no-cache-dir install
+657.04 KB
+128
+WORKDIR /videocap
+97 B
+129
+bash -c source /videocap/setup.sh &&
+185.76 MB
+130
+bash -c source /videocap/setup.sh &&
+14.42 MB
+131
+bash -c source /videocap/setup.sh &&
+72.69 MB
+132
+bash -c source /videocap/setup.sh &&
+5.8 MB
+133
+bash -c source /videocap/setup.sh &&
+423.68 MB
+134
+bash -c source /videocap/setup.sh &&
+21.96 KB
+135
+bash -c source /videocap/setup.sh &&
+95.7 KB
+136
+bash -c source /videocap/setup.sh &&
+8.16 MB
+137
+bash -c source /videocap/setup.sh &&
+10.06 MB

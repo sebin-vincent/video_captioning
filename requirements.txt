@@ -1,0 +1,11 @@
+deepspeed
+tensorboardX
+ete3
+av
+transformers
+azureml-core
+fairscale
+addict
+yapf
+boto3
+mpi4py
