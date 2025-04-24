@@ -13,6 +13,6 @@ mpi4py
 pyyaml
 numpy
 pandas
-cv2
+opencv-python
 tqdm
 easydict
