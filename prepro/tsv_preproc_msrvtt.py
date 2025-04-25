@@ -130,7 +130,7 @@ def process(split_type, csv_path):
     # Val: video6513 : video7009 (497)
     # Test: video7010 : video9999 (2990)
     video_ids = [gt_data['videos'][idx]['video_id'] for idx in range(len(gt_data['videos']))]
-    split_dict = {"train": video_ids[:6], "val": video_ids[6:6 + 1], "test": video_ids[6 + 1:]}
+    split_dict = {"train": video_ids[:6513], "val": video_ids[6513:6513 + 497], "test": video_ids[6513 + 497:]}
     choiced_video_ids = split_dict[split_type]
 
     sample_len = 0
