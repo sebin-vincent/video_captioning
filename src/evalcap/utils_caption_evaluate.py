@@ -64,6 +64,11 @@ def evaluate_on_coco_caption(res_file, label_file, outfile=None):
     label_file: .pt file, contains dict of image key to ground truth labels.
              or JSON file of coco style
     """
+
+    # res_file:./ output / checkpoint - 0 - 1 / pred.MSRVTT - v2.val.beam1.max20.tsv
+    # label_file: datasets / MSRVTT - v2 / val.caption_coco_format.json
+    # outfile:./ output / checkpoint - 0 - 1 / pred.MSRVTT - v2.val.beam1.max20.eval.json
+
     if not outfile:
         outfile = op.splitext(res_file)[0] + '.eval.json'
 
@@ -90,11 +95,19 @@ def evaluate_on_coco_caption(res_file, label_file, outfile=None):
     coco = COCO(label_file_coco)
     cocoRes = coco.loadRes(res_file_coco)
 
-    print("coco", coco)
-
-    print("cocoRes",cocoRes)
-
     cocoEval = COCOEvalCap(coco, cocoRes, 'corpus')
+
+    print("coco dataset: ",coco.dataset)
+    print("coco anns: ", coco.anns)
+    print("coco imgToAnns: ", coco.imgToAnns)
+    print("coco imgs: ", coco.imgs)
+
+    print("----------------------------")
+
+    print("CocoRes dataset: ", cocoEval.dataset)
+    print("CocoRes anns: ", cocoEval.anns)
+    print("CocoRes imgToAnns: ", cocoEval.imgToAnns)
+    print("CocoRes imgs: ", cocoEval.imgs)
 
     # evaluate on a subset of images by setting
     # cocoEval.params['image_id'] = cocoRes.getImgIds()
