@@ -85,8 +85,15 @@ def evaluate_on_coco_caption(res_file, label_file, outfile=None):
     else:
         label_file_coco = label_file
 
+    print("label_file_coco:", label_file_coco)
+    print("res_file_coco", res_file_coco)
     coco = COCO(label_file_coco)
     cocoRes = coco.loadRes(res_file_coco)
+
+    print("coco", coco)
+
+    print("cocoRes",cocoRes)
+
     cocoEval = COCOEvalCap(coco, cocoRes, 'corpus')
 
     # evaluate on a subset of images by setting
