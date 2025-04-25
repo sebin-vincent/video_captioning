@@ -24,8 +24,8 @@ class Bleu:
         imgIds = gts.keys()
 
         bleu_scorer = BleuScorer(n=self._n)
-        print("Printing res")
-        print(res)
+        print("Printing Blue res:", res)
+        print("Printing gts:", gts)
         for id in imgIds:
             hypo = res[id]
             ref = gts[id]

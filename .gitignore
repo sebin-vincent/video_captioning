@@ -46,14 +46,13 @@ linjli
 ############
 # it's better to unpack these files and commit the raw source
 # git has its own built in compression methods
-*.7z
-*.dmg
-*.gz
-*.iso
-*.jar
-*.rar
-*.tar
-*.zip
+#*.7z
+#*.dmg
+#*.gz
+#*.iso
+#*.rar
+#*.tar
+#*.zip
 
 # Logs and databases #
 ######################
@@ -77,4 +76,5 @@ Thumbs.db
 
 .venv/
 datasets/MSRVTT-v2/raw_videos/
+analysis/
 models/video_swin_transformer/swin_base_patch244_window877_kinetics600_22k.pth

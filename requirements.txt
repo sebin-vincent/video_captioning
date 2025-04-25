@@ -24,3 +24,6 @@ progressbar
 matplotlib
 future
 deprecated
+torchvision
+scipy
+scikit-image
