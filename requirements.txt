@@ -17,3 +17,10 @@ opencv-python
 tqdm
 easydict
 ijson
+packaging
+wheel
+pillow
+progressbar
+matplotlib
+future
+deprecated
