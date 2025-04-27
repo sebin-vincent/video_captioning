@@ -40,9 +40,6 @@ class COCOEvalCap:
     def evaluate(self):
         self.tokenize()
 
-        print("gts:", self.gts)
-        print("res:", self.res)
-
         # =================================================
         # Set up scorers
         # =================================================
