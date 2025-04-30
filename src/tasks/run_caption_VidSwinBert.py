@@ -17,6 +17,8 @@ import deepspeed
 from apex import amp
 from apex.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+
 from src.configs.config import (basic_check_arguments, shared_configs, restore_training_settings)
 from src.datasets.vl_dataloader import make_data_loader
 from src.evalcap.utils_caption_evaluate import evaluate_on_coco_caption
@@ -143,6 +145,10 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
     training_saver.save_args(args)
     training_saver.save_tokenizer(tokenizer)
 
+    train_loss_list = []
+    train_acc_list = []
+    global_steps_list = []
+
     for iteration, (img_keys, batch, meta_data) in enumerate(train_dataloader):
         iteration += 1
         data_time = time.time() - end
@@ -198,6 +204,14 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
                 scaled_loss.backward()
         if backward_now:
             global_step += 1
+
+            running_loss_val = running_loss.val
+            running_batch_acc_val = running_batch_acc.val
+
+            train_loss_list.append(running_loss_val)
+            train_acc_list.append(running_batch_acc_val)
+            global_steps_list.append(global_step)
+
             TB_LOGGER.add_scalar('train/loss', running_loss.val, global_step)
 
             lr_VisBone = optimizer.param_groups[0]["lr"]
@@ -304,6 +318,27 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
         if global_step >= max_global_step and (max_iter - iteration):
             logger.info(f'Missing {max_iter - iteration} iterations, early break')
             break
+
+    plt.figure(figsize=(12, 5))
+
+    # Plot Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(global_steps_list, train_loss_list, label='Train Loss')
+    plt.xlabel('Global Steps')
+    plt.ylabel('Loss')
+    plt.title('Training Loss over Steps')
+    plt.legend()
+
+    # Plot Accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(global_steps_list, train_acc_list, label='Train Accuracy')
+    plt.xlabel('Global Steps')
+    plt.ylabel('Accuracy')
+    plt.title('Training Accuracy over Steps')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
