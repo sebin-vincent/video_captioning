@@ -198,6 +198,7 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
                 scaled_loss.backward()
         if backward_now:
             global_step += 1
+
             TB_LOGGER.add_scalar('train/loss', running_loss.val, global_step)
 
             lr_VisBone = optimizer.param_groups[0]["lr"]

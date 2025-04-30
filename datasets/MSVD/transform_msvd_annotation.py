@@ -33,13 +33,15 @@ with open(input_file, 'r', encoding='utf-8') as f:
     print("Total :", len(data.keys()))
 
     for video_id, captions in data.items():
+        if count > 10:
+            break
         for caption in captions:
-            if count <= 1200:
+            if count <= 5:
                 train.append({
                     "video": video_id,
                     "caption": caption
                 })
-            elif count <= 1300:
+            elif count <= 7:
                 val.append({
                     "video": video_id,
                     "caption": caption
