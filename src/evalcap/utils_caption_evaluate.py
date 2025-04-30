@@ -97,17 +97,17 @@ def evaluate_on_coco_caption(res_file, label_file, outfile=None):
 
     cocoEval = COCOEvalCap(coco, cocoRes, 'corpus')
 
-    print("coco dataset: ",coco.dataset)
-    print("coco anns: ", coco.anns)
-    print("coco imgToAnns: ", coco.imgToAnns)
-    print("coco imgs: ", coco.imgs)
-
-    print("----------------------------")
-
-    print("CocoRes dataset: ", cocoRes.dataset)
-    print("CocoRes anns: ", cocoRes.anns)
-    print("CocoRes imgToAnns: ", cocoRes.imgToAnns)
-    print("CocoRes imgs: ", cocoRes.imgs)
+    # print("coco dataset: ",coco.dataset)
+    # print("coco anns: ", coco.anns)
+    # print("coco imgToAnns: ", coco.imgToAnns)
+    # print("coco imgs: ", coco.imgs)
+    #
+    # print("----------------------------")
+    #
+    # print("CocoRes dataset: ", cocoRes.dataset)
+    # print("CocoRes anns: ", cocoRes.anns)
+    # print("CocoRes imgToAnns: ", cocoRes.imgToAnns)
+    # print("CocoRes imgs: ", cocoRes.imgs)
 
     # evaluate on a subset of images by setting
     # cocoEval.params['image_id'] = cocoRes.getImgIds()
