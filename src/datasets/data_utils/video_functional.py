@@ -1,6 +1,7 @@
 import numbers
 import torch
 import cv2
+cv2.setNumThreads(0)
 import numpy as np
 import PIL
 from PIL import Image
