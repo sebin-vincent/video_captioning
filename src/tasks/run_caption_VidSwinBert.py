@@ -675,9 +675,6 @@ def main(args):
         dist.destroy_process_group()
 
 if __name__ == "__main__":
-    import multiprocessing
-
-    multiprocessing.set_start_method('spawn')
     shared_configs.shared_video_captioning_config(cbs=True, scst=True)
     args = get_custom_args(shared_configs)
     main(args)
