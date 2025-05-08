@@ -678,6 +678,7 @@ if __name__ == "__main__":
     import torch.multiprocessing
 
     torch.multiprocessing.set_sharing_strategy('file_system')
+    torch.multiprocessing.set_start_method('spawn')
     shared_configs.shared_video_captioning_config(cbs=True, scst=True)
     args = get_custom_args(shared_configs)
     main(args)
