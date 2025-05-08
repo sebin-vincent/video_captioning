@@ -675,6 +675,9 @@ def main(args):
         dist.destroy_process_group()
 
 if __name__ == "__main__":
+    import torch.multiprocessing
+
+    torch.multiprocessing.set_sharing_strategy('file_system')
     shared_configs.shared_video_captioning_config(cbs=True, scst=True)
     args = get_custom_args(shared_configs)
     main(args)
