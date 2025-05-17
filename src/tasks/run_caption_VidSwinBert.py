@@ -198,6 +198,7 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
                 scaled_loss.backward()
         if backward_now:
             global_step += 1
+
             TB_LOGGER.add_scalar('train/loss', running_loss.val, global_step)
 
             lr_VisBone = optimizer.param_groups[0]["lr"]
@@ -674,6 +675,9 @@ def main(args):
         dist.destroy_process_group()
 
 if __name__ == "__main__":
+    import torch.multiprocessing
+
+    torch.multiprocessing.set_sharing_strategy('file_system')
     shared_configs.shared_video_captioning_config(cbs=True, scst=True)
     args = get_custom_args(shared_configs)
     main(args)

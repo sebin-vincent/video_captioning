@@ -27,3 +27,5 @@ deprecated
 torchvision
 scipy
 scikit-image
+matplotlib
+csv
