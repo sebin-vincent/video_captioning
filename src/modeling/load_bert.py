@@ -2,6 +2,8 @@ from src.layers.bert import BertTokenizer, BertConfig, BertForImageCaptioning
 from src.utils.logger import LOGGER as logger
 
 def get_bert_model(args):
+    print("Bert Arguments")
+    print(args)
     # Load pretrained bert and tokenizer based on training configs
     config_class, model_class, tokenizer_class = BertConfig, BertForImageCaptioning, BertTokenizer
     config = config_class.from_pretrained(args.config_name if args.config_name else \
