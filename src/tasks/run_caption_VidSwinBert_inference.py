@@ -28,6 +28,7 @@ from src.utils.miscellaneous import (mkdir, set_seed, str_to_bool)
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+from src.modeling.load_robert import get_roberta_model # Added for RoBERTa support
 
 def _online_video_decode(args, video_path):
     decoder_num_frames = getattr(args, 'max_num_frames', 2)
@@ -147,7 +148,16 @@ def update_existing_config_for_inference(args):
 
     train_args.eval_model_dir = args.eval_model_dir
     train_args.resume_checkpoint = args.eval_model_dir + 'model.bin'
-    train_args.model_name_or_path = 'models/captioning/bert-base-uncased/'
+    # train_args.model_name_or_path should be loaded from the saved args.json or training_args.bin
+    # If not present, it will default to command-line args.model_name_or_path when get_bert/roberta_model is called.
+    # train_args.model_name_or_path = 'models/captioning/bert-base-uncased/' # This line is removed/modified
+    if 'model_name_or_path' not in train_args: # If not in saved args
+        train_args.model_name_or_path = args.model_name_or_path # Use command line arg for base model path
+    
+    # Handle text_encoder_type: prioritize saved, then command-line
+    # The default for args.text_encoder_type will be set in get_custom_args
+    train_args.text_encoder_type = getattr(train_args, 'text_encoder_type', args.text_encoder_type)
+
     train_args.do_train = False
     train_args.do_eval = True
     train_args.do_test = True
@@ -177,6 +187,7 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument('--text_encoder_type', type=str, default='bert', choices=['bert', 'roberta'], help="Type of text encoder to use (bert or roberta). This is used if not found in saved training args.")
     args = base_config.parse_args()
     return args
 
@@ -203,10 +214,17 @@ def main(args):
 
      # Get Video Swin model 
     swin_model = get_swin_model(args)
-    # Get BERT and tokenizer 
-    bert_model, config, tokenizer = get_bert_model(args)
+    # Get Text Encoder (BERT or RoBERTa) and tokenizer 
+    # args here is train_args, which has text_encoder_type potentially set from saved config
+    if args.text_encoder_type == 'roberta':
+        text_encoder_model, config, tokenizer = get_roberta_model(args)
+    elif args.text_encoder_type == 'bert':
+        text_encoder_model, config, tokenizer = get_bert_model(args)
+    else:
+        raise ValueError(f"Unsupported text_encoder_type in loaded args: {args.text_encoder_type}")
+    
     # build SwinBERT based on training configs
-    vl_transformer = VideoTransformer(args, config, swin_model, bert_model) 
+    vl_transformer = VideoTransformer(args, config, swin_model, text_encoder_model) 
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 
     # load weights for inference
