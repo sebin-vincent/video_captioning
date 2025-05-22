@@ -41,26 +41,57 @@ class VideoTransformer(torch.nn.Module):
         vid_feats = self.fc(vid_feats)
         # prepare VL transformer inputs
         kwargs['img_feats'] = vid_feats
-        if self.trans_encoder.bert.encoder.output_attentions:
-            self.trans_encoder.bert.encoder.set_output_attentions(False)
+
+        # Ensure output_attentions is False for this forward pass if it was configured to be True.
+        encoder_module = None
+        is_bert_model = False
+        if hasattr(self.trans_encoder, 'bert') and hasattr(self.trans_encoder.bert, 'encoder'):
+            encoder_module = self.trans_encoder.bert.encoder
+            is_bert_model = True
+        elif hasattr(self.trans_encoder, 'roberta') and hasattr(self.trans_encoder.roberta, 'encoder'): # Assuming RobertaForImageCaptioning has a 'roberta' attribute
+            encoder_module = self.trans_encoder.roberta.encoder
+        
+        if encoder_module is not None:
+            # Check the configuration if attentions would be outputted by default for this call
+            default_output_attentions = False
+            # For both BertEncoder and RobertaEncoder (from HF), the 'output_attentions' attribute directly reflects the config.
+            if hasattr(encoder_module, 'output_attentions'): 
+                default_output_attentions = encoder_module.output_attentions
+            elif hasattr(encoder_module, 'config') and hasattr(encoder_module.config, 'output_attentions'): # Fallback if direct attribute not found
+                default_output_attentions = encoder_module.config.output_attentions
+
+            if default_output_attentions:
+                if is_bert_model and hasattr(encoder_module, 'set_output_attentions') and callable(encoder_module.set_output_attentions):
+                    # This will modify the internal state of BertEncoder, including its config.output_attentions
+                    encoder_module.set_output_attentions(False)
+                else:
+                    # For RoBERTa (or if BERT model somehow misses set_output_attentions)
+                    # we pass output_attentions=False via kwargs to the model's forward call.
+                    # This will override the config for the duration of that call.
+                    kwargs['output_attentions'] = False
+        
         # learn soft attention mask
         if self.learn_mask_enabled:
             kwargs['attention_mask'] = kwargs['attention_mask'].float()
             vid_att_len = self.max_img_seq_length
+            current_device = kwargs['img_feats'].device # Get device from an existing tensor in kwargs
             learn_att = self.learn_vid_att.weight.reshape(vid_att_len,vid_att_len)
             learn_att = self.sigmoid(learn_att)
-            diag_mask = torch.diag(torch.ones(vid_att_len)).cuda()
+            diag_mask = torch.diag(torch.ones(vid_att_len, device=current_device))
             video_attention = (1. - diag_mask)*learn_att
             learn_att = diag_mask + video_attention
             if self.sparse_mask_soft2hard:
                 learn_att = (learn_att>=0.5)*1.0
-                learn_att = learn_att.cuda()
-                learn_att.requires_grad = False
+                # learn_att is already on the correct device if self.learn_vid_att.weight is.
+                # If learn_vid_att is on CPU and other parts on GPU, it needs .to(current_device)
+                # Assuming learn_vid_att is on the same device or handled by nn.Module's to() method.
+                learn_att.requires_grad = False # This should be fine
             kwargs['attention_mask'][:, -vid_att_len::, -vid_att_len::] = learn_att
+        
         outputs = self.trans_encoder(*args, **kwargs)
         if self.learn_mask_enabled:
             loss_sparsity = self.get_loss_sparsity(video_attention)  
-            outputs = outputs + (loss_sparsity, )          
+            outputs = outputs + (loss_sparsity, )
         return outputs
     
     def get_loss_sparsity(self, video_attention):
