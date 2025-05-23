@@ -26,7 +26,6 @@ pt/
 
 # Project-related   #
 */*results*/
-*results*/
 tmp*/
 cache/*
 */cache*/
