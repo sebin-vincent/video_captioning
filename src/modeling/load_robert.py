@@ -23,7 +23,7 @@ def get_roberta_model(args, config_name=None, model_name=None):
     effective_model_name = model_name if model_name else args.model_name_or_path
     
     # Load RoBERTa configuration
-    config = RobertaConfig.from_pretrained(effective_config_name, cache_dir=args.cache_dir)
+    config = RobertaConfig.from_pretrained(effective_config_name)
 
     # Update config with specific arguments from 'args'
     # This follows the pattern in get_bert_model
@@ -58,10 +58,13 @@ def get_roberta_model(args, config_name=None, model_name=None):
     # Load Tokenizer (RobertaTokenizerModified)
     # effective_tokenizer_name = model_name if model_name else args.model_name_or_path
     # Using effective_model_name for tokenizer for consistency with model loading
-    tokenizer = RobertaTokenizerModified.from_pretrained(effective_model_name, cache_dir=args.cache_dir)
+    tokenizer = RobertaTokenizerModified.from_pretrained(effective_model_name)
+
 
     # Load Model (RobertaForImageCaptioning)
-    model = RobertaForImageCaptioning.from_pretrained(effective_model_name, config=config, cache_dir=args.cache_dir)
+    model = RobertaForImageCaptioning.from_pretrained(effective_model_name)
+
+    config.mask_token_id = tokenizer.mask_token_id
 
     logger.info("Model: %s", type(model))
     total_params = sum(p.numel() for p in model.parameters())

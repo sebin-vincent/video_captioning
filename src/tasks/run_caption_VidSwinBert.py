@@ -573,7 +573,10 @@ def main(args):
     else:
         raise ValueError(f"Unsupported text_encoder_type: {args.text_encoder_type}")
     # build SwinBERT based on training configs
-    vl_transformer = VideoTransformer(args, config, swin_model, text_encoder_model) 
+    vl_transformer = VideoTransformer(args, config, swin_model, text_encoder_model)
+    word_embeddings_layer = vl_transformer.trans_encoder.roberta.embeddings.word_embeddings
+    num_embeddings_in_layer = word_embeddings_layer.num_embeddings
+    print(f"nn.Embedding Layer (word_embeddings) num_embeddings: {num_embeddings_in_layer}")
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 
     if args.do_eval:

@@ -11,7 +11,7 @@ PRETRAINED_VOCAB_FILES_MAP = {
         "roberta-base": "https://huggingface.co/roberta-base/resolve/main/vocab.json",
         "roberta-large": "https://huggingface.co/roberta-large/resolve/main/vocab.json",
     },
-    "merges_file": {~
+    "merges_file": {
         "roberta-base": "https://huggingface.co/roberta-base/resolve/main/merges.txt",
         "roberta-large": "https://huggingface.co/roberta-large/resolve/main/merges.txt",
     },
@@ -34,11 +34,11 @@ class RobertaTokenizerModified(PreTrainedTokenizer):  # Rename the class
         self,
         vocab_file,
         merges_file,
-        unk_token="[UNK]",
-        sep_token="[SEP]",
-        pad_token="[PAD]",
-        cls_token="[CLS]",
-        mask_token="[MASK]",
+        unk_token="<unk>",
+        sep_token="</s>",
+        pad_token="<pad>",
+        cls_token="<s>",
+        mask_token="<mask>",
         add_prefix_space=False,  # RoBERTa specific
         **kwargs,
     ):
