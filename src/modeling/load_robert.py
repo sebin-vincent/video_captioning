@@ -12,6 +12,9 @@ from src.layers.roberta.modeling_roberta import RobertaForImageCaptioning
 logger = logging.getLogger(__name__)
 
 def get_roberta_model(args, config_name=None, model_name=None):
+
+    print(f"Args: ${args}")
+
     """
     Load RoBERTa model and tokenizer, similar to get_bert_model.
     """
@@ -65,7 +68,7 @@ def get_roberta_model(args, config_name=None, model_name=None):
     logger.info("Total Parameters: %d", total_params)
     
     # Handling fine-tuning from a checkpoint (similar to get_bert_model)
-    if args.resume_checkpoint and hasattr(args, 'load_ συγκεκριμένα_weights_from_checkpoint') and args.load_ συγκεκριμένα_weights_from_checkpoint:
+    if args.resume_checkpoint and hasattr(args, 'load_weights_from_checkpoint') and args.load_weights_from_checkpoint:
         logger.info("Loading weights from checkpoint: %s", args.resume_checkpoint)
         checkpoint = torch.load(args.resume_checkpoint, map_location='cpu')
         

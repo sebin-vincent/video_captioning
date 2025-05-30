@@ -33,7 +33,8 @@ import torch.nn.functional as F
 # Potential issue: modeling_utils might be BERT-specific. Need to check if a RoBERTa version exists or adapt.
 # For now, let's assume it's compatible or a RoBERTa version will be used.
 # Assuming modeling_utils from transformers.modeling_utils can be used, or a custom one for roberta
-from transformers.modeling_utils import PreTrainedModel, prune_linear_layer, add_start_docstrings
+from transformers.modeling_utils import PreTrainedModel, prune_linear_layer
+from transformers.utils.doc import add_start_docstrings
 from transformers.utils import logging as hf_logging # Using Hugging Face's logging
 # from transformers.configuration_roberta import RobertaConfig # Using Hugging Face's RobertaConfig
 from transformers import RobertaConfig

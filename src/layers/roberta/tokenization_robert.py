@@ -1,5 +1,7 @@
-from transformers import RobertaTokenizer  # Import RobertaTokenizer
+import random
+from transformers import RobertaTokenizer, RobertaTokenizerFast   # Import RobertaTokenizer
 from transformers import PreTrainedTokenizer
+from typing import List, Optional, Tuple
 import os
 import collections
 
@@ -9,7 +11,7 @@ PRETRAINED_VOCAB_FILES_MAP = {
         "roberta-base": "https://huggingface.co/roberta-base/resolve/main/vocab.json",
         "roberta-large": "https://huggingface.co/roberta-large/resolve/main/vocab.json",
     },
-    "merges_file": {
+    "merges_file": {~
         "roberta-base": "https://huggingface.co/roberta-base/resolve/main/merges.txt",
         "roberta-large": "https://huggingface.co/roberta-large/resolve/main/merges.txt",
     },
@@ -31,7 +33,7 @@ class RobertaTokenizerModified(PreTrainedTokenizer):  # Rename the class
     def __init__(
         self,
         vocab_file,
-        merges_file,  # RoBERTa specific
+        merges_file,
         unk_token="[UNK]",
         sep_token="[SEP]",
         pad_token="[PAD]",
@@ -40,39 +42,69 @@ class RobertaTokenizerModified(PreTrainedTokenizer):  # Rename the class
         add_prefix_space=False,  # RoBERTa specific
         **kwargs,
     ):
+        # Step 1: Initialize the underlying RobertaTokenizerFast.
+        # This tokenizer will correctly load vocab.json and merges.txt.
+        self.roberta_tokenizer = RobertaTokenizerFast(
+            vocab_file=vocab_file,
+            merges_file=merges_file,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            pad_token=pad_token,
+            cls_token=cls_token,
+            mask_token=mask_token,
+            add_prefix_space=add_prefix_space,
+            **kwargs # Pass kwargs, RobertaTokenizerFast will use what it needs
+        )
+
+        # Step 2: Set self.vocab using the vocab loaded by RobertaTokenizerFast.
+        # This is crucial because super().__init__() will call self.get_vocab(),
+        # which in this class returns self.vocab.
+        self.vocab = self.roberta_tokenizer.get_vocab()  # get_vocab() returns a dict copy
+        self.ids_to_tokens = collections.OrderedDict(
+            [(ids, tok) for tok, ids in self.vocab.items()]
+        )
+        # The 'add_prefix_space' attribute is primarily for the roberta_tokenizer's behavior.
+        # Storing it on self directly might be for consistency or if any local methods use it.
+        self.add_prefix_space = add_prefix_space
+
+        # Step 3: Now call the superclass __init__.
+        # It handles setting up special token attributes on the tokenizer instance.
         super().__init__(
             unk_token=unk_token,
             sep_token=sep_token,
             pad_token=pad_token,
             cls_token=cls_token,
             mask_token=mask_token,
-            **kwargs,
+            add_prefix_space=add_prefix_space, # Pass this, PreTrainedTokenizer may use it via kwargs
+            **kwargs # Pass remaining kwargs
         )
-        if not os.path.isfile(vocab_file):
-            raise ValueError(
-                "Can't find a vocabulary file at path '{}'.".format(vocab_file)
-            )
-        if not os.path.isfile(merges_file):
-            raise ValueError(
-                "Can't find a merges file at path '{}'.".format(merges_file)
-            )
 
-        self.vocab = self.load_vocab(vocab_file, merges_file)  # Use custom load_vocab
-        self.ids_to_tokens = collections.OrderedDict(
-            [(ids, tok) for tok, ids in self.vocab.items()]
-        )
-        self.merges = self.load_merges(merges_file)
-        self.add_prefix_space = add_prefix_space  # Store the add_prefix_space attribute
-        self.roberta_tokenizer = RobertaTokenizerFast(  # Use the fast tokenizer
-            vocab_file=vocab_file,
-            merges_file=merges_file,
-            add_prefix_space=add_prefix_space,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            pad_token=pad_token,
-            cls_token=cls_token,
-            mask_token=mask_token,
-        )
+    def get_random_token(self) -> str:
+        """
+        Gets a random token from the vocabulary, excluding special tokens.
+        """
+        # Use the vocabulary from the underlying RobertaTokenizerFast instance
+        vocab_items = list(self.roberta_tokenizer.get_vocab().keys())
+
+        # Identify special tokens to exclude.
+        # self.all_special_tokens is available from PreTrainedTokenizer.
+        special_tokens_to_exclude = set(self.all_special_tokens)
+
+        # Filter out special tokens
+        valid_tokens = [token for token in vocab_items if token not in special_tokens_to_exclude]
+
+        if not valid_tokens:
+            # Fallback or error if no valid tokens are found (should not happen with a proper vocab)
+            # You could return a common token or raise an error.
+            # For simplicity, let's pick from all tokens if filtering somehow fails,
+            # though this is less ideal for MLM.
+            # A better fallback might be to return self.unk_token, but that's not random.
+            # Or, ensure vocab_items itself is non-empty and pick from it if valid_tokens is empty.
+            if not vocab_items:
+                raise ValueError("Vocabulary is empty, cannot select a random token.")
+            return random.choice(vocab_items)
+
+        return random.choice(valid_tokens)
 
     def build_inputs_with_special_tokens(
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
@@ -130,12 +162,18 @@ class RobertaTokenizerModified(PreTrainedTokenizer):  # Rename the class
 
         return self.roberta_tokenizer.convert_tokens_to_string(tokens)
 
-    def save_vocabulary(self, vocab_path):
-        """Save the tokenizer vocabulary and configuration files (if any) to a directory.
+    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
         """
+        Save the tokenizer vocabulary and merge files to a directory.
+        The `filename_prefix` argument is compatible with the parent Hugging Face
+        tokenizer's `save_vocabulary` method.
+        """
+        # This delegates to RobertaTokenizerFast's save_vocabulary,
+        # which handles vocab.json and merges.txt.
         return self.roberta_tokenizer.save_vocabulary(
-            vocab_path
-        )  # Use RobertaTokenizer's method
+            save_directory=save_directory,
+            filename_prefix=filename_prefix
+        ) # Use RobertaTokenizer's method
 
     def get_vocab(self):
         """
