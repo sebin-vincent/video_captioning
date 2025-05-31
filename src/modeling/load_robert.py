@@ -60,11 +60,10 @@ def get_roberta_model(args, config_name=None, model_name=None):
     # Using effective_model_name for tokenizer for consistency with model loading
     tokenizer = RobertaTokenizerModified.from_pretrained(effective_model_name)
 
+    config.mask_token_id = tokenizer.mask_token_id
 
     # Load Model (RobertaForImageCaptioning)
-    model = RobertaForImageCaptioning.from_pretrained(effective_model_name)
-
-    config.mask_token_id = tokenizer.mask_token_id
+    model = RobertaForImageCaptioning.from_pretrained(effective_model_name,config=config)
 
     logger.info("Model: %s", type(model))
     total_params = sum(p.numel() for p in model.parameters())
