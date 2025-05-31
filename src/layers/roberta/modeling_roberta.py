@@ -91,11 +91,16 @@ class RobertaEmbeddings(nn.Module):
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
 
-        self.LayerNorm = RobertaLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = RobertaLayerNorm(config.hidden_size, eps=config.layer_norm_eps) # This is torch.nn.LayerNorm
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-        # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        # RoBERTa has a different way of handling position_ids, often starting with a padding offset.
+        # The `padding_idx` is used by RoBERTa to offset positions.
+        # See HuggingFace transformers.models.roberta.modeling_roberta.RobertaEmbeddings
+        self.padding_idx = config.pad_token_id
+        self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size, padding_idx=self.padding_idx)
+        # position_ids (1, len position emb) is contiguous in memory and exported when serialized, handled by create_position_ids_from_input_ids
+        # self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1))) # Not needed if generated on the fly
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
 
 
@@ -108,19 +113,32 @@ class RobertaEmbeddings(nn.Module):
         seq_length = input_shape[1]
 
         if position_ids is None:
-            position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length]
+            # Create position_ids with RoBERTa's offset: self.padding_idx + 1 + past_key_values_length
+            # position_ids = torch.arange(past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=input_ids.device if input_ids is not None else inputs_embeds.device)
+            # position_ids = position_ids.unsqueeze(0).expand(input_shape) + self.padding_idx + 1
+            # HuggingFace RoBERTaEmbeddings.create_position_ids_from_input_ids logic:
+            mask = input_ids.ne(self.padding_idx).int()
+            incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask) + past_key_values_length) * mask
+            position_ids = incremental_indices.long() + self.padding_idx
+
 
         if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
+            # RoBERTa typically does not use token_type_ids, but if type_vocab_size > 1, they can be used.
+            # Default to zeros if not provided, as in BERT.
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=input_ids.device if input_ids is not None else inputs_embeds.device)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
+
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        embeddings = inputs_embeds + token_type_embeddings
+        embeddings = inputs_embeds + token_type_embeddings # RoBERTa often doesn't use token_type_embeddings meaningfully if type_vocab_size is 1
+
         if self.position_embedding_type == "absolute":
+            # Ensure position_ids are correctly passed to position_embeddings
             position_embeddings = self.position_embeddings(position_ids)
             embeddings += position_embeddings
+
         embeddings = self.LayerNorm(embeddings)
         embeddings = self.dropout(embeddings)
         return embeddings
@@ -150,7 +168,7 @@ class RobertaSelfAttention(nn.Module):
             self.max_position_embeddings = config.max_position_embeddings
             self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
         
-        self.output_attentions = config.output_attentions
+        # self.output_attentions = config.output_attentions # This should be determined by the 'output_attentions' argument in forward
 
 
     def transpose_for_scores(self, x):
@@ -219,7 +237,8 @@ class RobertaSelfAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
-        outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
+        # output_attentions is passed to forward method, config.output_attentions is a fallback.
+        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
         return outputs
 
 
@@ -376,8 +395,9 @@ class RobertaEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
-        self.output_attentions = config.output_attentions # Added
-        self.output_hidden_states = config.output_hidden_states # Added
+        # self.output_attentions = config.output_attentions # Determined by forward pass argument
+        # self.output_hidden_states = config.output_hidden_states # Determined by forward pass argument
+        # self.return_dict = config.use_return_dict # Determined by forward pass argument
 
     def forward(
         self,
@@ -387,23 +407,28 @@ class RobertaEncoder(nn.Module):
         encoder_hidden_states=None,
         encoder_attention_mask=None,
         past_key_values=None,
-        use_cache=None,
-        output_attentions=False, # Fallback if not in config
-        output_hidden_states=False, # Fallback if not in config
-        return_dict=True, # Added
+        use_cache=None, # if True, past_key_values are returned and can be used to speed up decoding
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
     ):
-        all_hidden_states = () if self.output_hidden_states else None # Corrected to use self.output_hidden_states
-        all_attentions = () if self.output_attentions else None # Corrected to use self.output_attentions
-        
-        # Corrected usage of output_attentions and output_hidden_states
-        # output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        # output_hidden_states = (
-        #     output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        # )
+        # Fallback to config values if not provided in forward pass
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        use_cache = use_cache if use_cache is not None else self.config.use_cache
 
+
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attentions = () if output_attentions else None
+        all_cross_attentions = () if output_attentions and self.config.is_decoder else None # For cross-attention if decoder
+
+        next_decoder_cache = () if use_cache else None
 
         for i, layer_module in enumerate(self.layer):
-            if self.output_hidden_states: # Corrected
+            if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
@@ -417,22 +442,53 @@ class RobertaEncoder(nn.Module):
                 encoder_hidden_states,
                 encoder_attention_mask,
                 past_key_value,
-                self.output_attentions, # Corrected
+                output_attentions, # Pass the resolved output_attentions
             )
             hidden_states = layer_outputs[0]
+            if use_cache:
+                next_decoder_cache += (layer_outputs[-1],) # Assuming last element is past_key_value
 
-            if self.output_attentions: # Corrected
-                all_attentions = all_attentions + (layer_outputs[1],)
-        
-        if self.output_hidden_states: # Corrected
+            if output_attentions:
+                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                if self.config.is_decoder and len(layer_outputs) > 2 and layer_outputs[2] is not None : # Cross attention
+                     all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
+
+        if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
+        # Standard HuggingFace tuple output for encoder
+        # (last_hidden_state, all_hidden_states, all_self_attentions, all_cross_attentions)
+        # For encoder-only, all_cross_attentions will be None or empty tuple.
+        # If not return_dict:
         outputs = (hidden_states,)
-        if self.output_hidden_states : # Corrected
+        if output_hidden_states:
             outputs = outputs + (all_hidden_states,)
-        if self.output_attentions : # Corrected
-            outputs = outputs + (all_attentions,)
-        return outputs # hidden_states, (all_hidden_states), (all_attentions)
+        if output_attentions:
+            outputs = outputs + (all_self_attentions,)
+            if self.config.is_decoder and all_cross_attentions: # Only add if relevant
+                outputs = outputs + (all_cross_attentions,)
+
+        # This part is more for BaseMoedelOutput or similar, but we return a tuple.
+        # if not return_dict:
+        #     return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions, all_cross_attentions] if v is not None)
+
+        # Based on instruction: (last_hidden_state, all_hidden_states_tuple_or_None, all_attentions_tuple_or_None)
+        # "all_attentions" here means self_attentions for an encoder.
+        # If it's a decoder, it would include cross-attentions as well or separately.
+        # For simplicity and matching BertEncoder, we'll return self_attentions.
+
+        final_outputs = (hidden_states,)
+        if output_hidden_states:
+            final_outputs += (all_hidden_states,)
+        else:
+            final_outputs += (None,) # Placeholder for all_hidden_states
+
+        if output_attentions:
+            final_outputs += (all_self_attentions,) # Assuming all_attentions means self_attentions for encoder
+        else:
+            final_outputs += (None,) # Placeholder for all_attentions
+
+        return final_outputs # last_hidden_state, all_hidden_states, all_self_attentions
 
 
 # Adapted from BertPooler
@@ -494,12 +550,12 @@ class RobertaPreTrainedModel(PreTrainedModel):
     models.
     """
     config_class = RobertaConfig
-    load_tf_weights = load_tf_weights_in_roberta # Placeholder
+    # load_tf_weights = load_tf_weights_in_roberta # RoBERTa models are typically not loaded from TF checkpoints
     base_model_prefix = "roberta"
-    # The following three attributes are specific to RoBERTa.
-    #_keys_to_ignore_on_load_missing = [r"position_ids"] # From RobertaModel
-    #_keys_to_ignore_on_load_unexpected = [r"pooler"] # From RobertaForMaskedLM
-    #_keys_to_ignore_on_save = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"] # From RobertaForCausalLM
+    _keys_to_ignore_on_load_missing = [r"position_ids"] # From HuggingFace RobertaModel
+    # _keys_to_ignore_on_load_unexpected = [r"pooler"] # Specific to some head models
+    # _keys_to_ignore_on_save = [] # Specific to some head models
+
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -513,9 +569,12 @@ class RobertaPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, RobertaLayerNorm): # Corrected to RobertaLayerNorm
+        elif isinstance(module, nn.LayerNorm): # Standard LayerNorm
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    # Removed load_tf_weights_in_roberta as it's a placeholder and rarely used.
+    # load_tf_weights = load_tf_weights_in_roberta
     
     @property
     def dummy_inputs(self): # Added from RobertaModel for testing/tracing
@@ -551,65 +610,167 @@ class RobertaImgModel(RobertaPreTrainedModel):
                 self.LayerNorm = RobertaLayerNorm(config.hidden_size, eps=getattr(config, 'img_layer_norm_eps', config.layer_norm_eps) )
 
 
-        self.init_weights() # Call init_weights (it's _init_weights in PreTrainedModel)
+        self.init_weights()
 
-    def _init_weights(self, module): # Renamed from init_weights to _init_weights
-        super()._init_weights(module) # Call parent's _init_weights
-        # Custom weight initialization for img_embedding if needed
-        if isinstance(module, nn.Linear) and hasattr(module, 'is_img_embedding'):
-             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range) # Example
-             if module.bias is not None:
-                 module.bias.data.zero_()
-        # Re-initialize img_embedding weights if necessary (example from BertImgModel)
-        # self.img_embedding.weight.data.normal_(mean=0.0, std=self.config.initializer_range if hasattr(self.config, 'initializer_range') else 0.02)
+    # Removed _init_weights from RobertaImgModel to rely on RobertaPreTrainedModel._init_weights
+    # Specific initializations for img_embedding can be done in __init__ if necessary,
+    # but standard nn.Linear initialization from parent should suffice.
+
+    def _resize_token_embeddings(self, new_num_tokens):
+        # Method to resize token embeddings, similar to BertModel._resize_token_embeddings
+        # It should resize self.embeddings.word_embeddings
+        old_embeddings = self.embeddings.word_embeddings
+        new_embeddings = self._get_resized_embeddings(old_embeddings, new_num_tokens)
+        self.embeddings.word_embeddings = new_embeddings
+        # Update the decoder weights if they are tied to the word_embeddings
+        if self.config.tie_word_embeddings and hasattr(self, "cls") and hasattr(self.cls, "predictions") and hasattr(self.cls.predictions, "decoder"):
+             self.cls.predictions.decoder.weight = new_embeddings.weight
+        return self.embeddings.word_embeddings
+
+    def _prune_heads(self, heads_to_prune):
+        """ Prunes heads of the model.
+            heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
+            See base class PreTrainedModel
+        """
+        # This method should call the encoder's prune_heads method
+        if hasattr(self.encoder, 'prune_heads'):
+            self.encoder.prune_heads(heads_to_prune)
+        else:
+            logger.warning("Encoder does not have a prune_heads method.")
 
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None,
-            position_ids=None, head_mask=None, img_feats=None,
-            encoder_history_states=None, # This was in BertImgModel, RoBERTa might handle it differently (e.g. past_key_values)
-            inputs_embeds=None, # Added for compatibility with RobertaModel
-            output_attentions=None, # Added
-            output_hidden_states=None, # Added
-            return_dict=None # Added
-            ):
+    def forward(self,
+                input_ids=None,
+                attention_mask=None,
+                token_type_ids=None,
+                position_ids=None,
+                head_mask=None,
+                inputs_embeds=None,
+                img_feats=None,
+                encoder_hidden_states=None, # Not directly used by RobertaEncoder, map to past_key_values if applicable for generation
+                encoder_attention_mask=None, # Not directly used by RobertaEncoder for self-attention
+                past_key_values=None, # Preferred way for RoBERTa encoder history
+                use_cache=None,
+                output_attentions=None,
+                output_hidden_states=None,
+                return_dict=None):
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        use_cache = use_cache if use_cache is not None else self.config.use_cache # For encoder
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
             input_shape = input_ids.size()
             batch_size, seq_length = input_shape
+            device = input_ids.device
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
-            batch_size, seq_length = input_shape
+            batch_size, seq_length = input_shape # text seq_length
+            device = inputs_embeds.device
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        # Map encoder_history_states to past_key_values if provided and past_key_values is None
+        if encoder_history_states is not None and past_key_values is None:
+            past_key_values = encoder_history_states # Assuming compatible format
 
-
+        # Attention mask
+        # Handle attention_mask for text and image features
         if attention_mask is None:
-            attention_mask = torch.ones(((batch_size, seq_length + (img_feats.shape[1] if img_feats is not None else 0))), device=device)
-        if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+            # If no mask is provided, create a full attention mask that attends to everything
+            current_seq_length = seq_length
+            if img_feats is not None:
+                current_seq_length += img_feats.shape[1]
+            attention_mask = torch.ones((batch_size, current_seq_length), device=device)
+        elif img_feats is not None and attention_mask.shape[1] == seq_length :
+            # If mask is for text only, extend it for image features
+            img_attention_mask = torch.ones((batch_size, img_feats.shape[1]), device=device, dtype=attention_mask.dtype)
+            attention_mask = torch.cat([attention_mask, img_attention_mask], dim=1)
+        # If attention_mask is already combined length, it's used as is.
+
+        if token_type_ids is None and hasattr(self.embeddings, 'token_type_embeddings'):
+             # Some RoBERTa versions might not use token_type_ids extensively if type_vocab_size is 1
+             # Create zeros if input_ids are given, otherwise this will be handled by RobertaEmbeddings if inputs_embeds path is taken.
+            if input_ids is not None:
+                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+        # If token_type_ids are provided for text and img_feats are present, they should cover the concatenated sequence.
+        # For simplicity, if img_feats are added, token_type_ids for the image part can be a default (e.g., 0 or 1),
+        # or assumed to be part of the input `token_type_ids` if it's already of combined length.
+        # RobertaEmbeddings will handle token_type_ids for the text part.
+
+        # Get text embeddings
+        embedding_output = self.embeddings(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            token_type_ids=token_type_ids, # Pass token_type_ids for the text part
+            inputs_embeds=inputs_embeds,
+            past_key_values_length=past_key_values[0][0].shape[2] if past_key_values is not None else 0, # RobertaEmbeddings uses this
+        )
+
+        # Process and concatenate image embeddings if img_feats are provided
+        if img_feats is not None:
+            if self.img_feature_type == 'dis_code':
+                # Assuming similar handling as BertImgModel for 'dis_code'
+                # code_emb = self.code_embeddings(img_feats) # Placeholder, ensure code_embeddings exists if type is 'dis_code'
+                # img_embedding_output = self.img_embedding(code_emb)
+                # For now, simplified, assuming 'fc' or similar direct mapping for other types
+                logger.warning("img_feature_type 'dis_code' specific path in RobertaImgModel needs full implementation if used.")
+                img_embedding_output = self.img_embedding(img_feats) # Fallback for now
+            elif self.img_feature_type == 'dis_code_t':
+                 logger.warning("img_feature_type 'dis_code_t' specific path in RobertaImgModel needs full implementation if used.")
+                 img_embedding_output = self.img_embedding(img_feats) # Fallback for now
+            elif self.img_feature_type == 'dis_code_scale':
+                 logger.warning("img_feature_type 'dis_code_scale' specific path in RobertaImgModel needs full implementation if used.")
+                 img_embedding_output = self.img_embedding(img_feats) # Fallback for now
+            else: # Default 'fc' or other direct mapping
+                img_embedding_output = self.img_embedding(img_feats)
+
+            if self.use_img_layernorm:
+                # Ensure LayerNorm is defined in __init__ for this path
+                if hasattr(self, 'LayerNorm') and self.LayerNorm is not None:
+                     img_embedding_output = self.LayerNorm(img_embedding_output)
+                else: # Fallback if self.LayerNorm for images was not initialized (e.g. if use_img_layernorm was false)
+                     logger.warning("use_img_layernorm is true, but self.LayerNorm for images is not defined. Skipping LayerNorm.")
+
+            # Dropout for image embeddings
+            img_embedding_output = self.dropout(img_embedding_output)
+
+            # Concatenate text and image embeddings
+            embedding_output = torch.cat((embedding_output, img_embedding_output), dim=1)
+
+            # If token_type_ids were only for text, extend them for the image part
+            if token_type_ids is not None and token_type_ids.shape[1] == seq_length:
+                img_token_type = getattr(self.config, 'img_token_type', 0) # Default image token type to 0 or 1
+                img_token_type_ids = torch.full(
+                    (batch_size, img_feats.shape[1]),
+                    img_token_type,
+                    dtype=torch.long,
+                    device=device
+                )
+                # This assumes self.embeddings was called with text-only token_type_ids.
+                # However, RobertaEmbeddings itself doesn't take concatenated token_type_ids.
+                # The token_type_embeddings are added *inside* RobertaEmbeddings.
+                # For simplicity, we assume token_type_ids passed to RobertaEmbeddings are for text,
+                # and image part doesn't get explicit token_type_ids added here at concatenation stage,
+                # relying on RobertaEmbeddings to handle its part. If type_vocab_size is small for RoBERTa, this is less critical.
+                # A more robust way for combined sequences would be to create combined token_type_ids *before* self.embeddings,
+                # but that changes how self.embeddings is called if it expects only text part.
+                # The current RobertaEmbeddings is for text only.
+                # So, we are concatenating pure image embeddings with text embeddings that already include token_type.
+                pass # No explicit token_type_id extension after cat for now, relies on how RobertaEmbeddings works.
 
 
-        # RoBERTa uses `padding_mask` instead of `attention_mask` for some internal calculations
-        # The `attention_mask` passed to `RobertaModel` should be the extended version
-        # However, BertImgModel constructs its own extended_attention_mask. We'll follow that pattern.
-
-        # We create a 3D attention mask from a 2D tensor mask.
-        # Sizes are [batch_size, 1, 1, to_seq_length]
-        # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
+        # Prepare extended attention mask
+        # extended_attention_mask = self.get_extended_attention_mask(attention_mask, embedding_output.shape[:2], device)
+        # Re-using existing logic from file for extended_attention_mask:
         if attention_mask.dim() == 2:
             extended_attention_mask = attention_mask[:, None, None, :]
-        elif attention_mask.dim() == 3: # For compatibility if a pre-extended mask is passed
+        elif attention_mask.dim() == 3: # For compatibility if a pre-extended mask is passed (e.g. from beam search)
             extended_attention_mask = attention_mask[:, None, :, :]
         else:
             raise ValueError(f"Wrong shape for attention_mask (shape {attention_mask.shape})")
@@ -618,46 +779,38 @@ class RobertaImgModel(RobertaPreTrainedModel):
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
 
-        embedding_output = self.embeddings(input_ids=input_ids, position_ids=position_ids,
-                                           token_type_ids=token_type_ids, inputs_embeds=inputs_embeds)
-
-        if img_feats is not None:
-            if self.img_feature_type == 'dis_code':
-                # ... (handling for dis_code as in BertImgModel)
-                pass
-            else: # Default 'fc'
-                img_embedding_output = self.img_embedding(img_feats)
-                if self.use_img_layernorm:
-                    img_embedding_output = self.LayerNorm(img_embedding_output)
-                img_embedding_output = self.dropout(img_embedding_output)
-            
-            # Concatenate word and image embeddings
-            embedding_output = torch.cat((embedding_output, img_embedding_output), 1)
-            # The attention mask also needs to be updated for the concatenated sequence length
-            # This was handled by passing the combined length to ones_like in BertImgModel's attention_mask creation
-            # Ensure extended_attention_mask reflects this combined length
-
-        # RoBERTa's encoder does not typically take encoder_history_states.
-        # It uses past_key_values for recurrent decoding. This needs careful adaptation if that feature is used.
-        # For now, assuming standard encoder pass.
+        # Pass to RoBERTa encoder
         encoder_outputs = self.encoder(
             embedding_output,
-            attention_mask=extended_attention_mask, # This should be the extended mask
+            attention_mask=extended_attention_mask,
             head_mask=head_mask,
-            # encoder_hidden_states=None, # RoBERTa encoder doesn't take this directly
-            # encoder_attention_mask=None, # RoBERTa encoder doesn't take this directly
-            # past_key_values=encoder_history_states, # If encoder_history_states maps to past_key_values
+            encoder_hidden_states=encoder_hidden_states, # Should be None for self-attention encoder
+            encoder_attention_mask=encoder_attention_mask, # Should be None for self-attention encoder
+            past_key_values=past_key_values,
+            use_cache=use_cache,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            # return_dict=return_dict, # Encoder might not return dict directly, handle from its output tuple
+            return_dict=return_dict, # Encoder itself might not use return_dict for tuple output
         )
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output)
 
-        # If not using return_dict, mimic HuggingFace tuple output
-        # outputs = (sequence_output, pooled_output,) + encoder_outputs[1:]
-        # For now, assume similar output structure to BertImgModel
-        return (sequence_output, pooled_output) + encoder_outputs[1:]
+        # Consistent tuple output
+        # encoder_outputs = (last_hidden_state, all_hidden_states, all_self_attentions)
+        # We want (sequence_output, pooled_output, all_hidden_states, all_attentions)
+
+        final_outputs = (sequence_output, pooled_output)
+        if output_hidden_states and len(encoder_outputs) > 1 and encoder_outputs[1] is not None:
+            final_outputs += (encoder_outputs[1],) # all_hidden_states
+        else:
+            final_outputs += (None,)
+
+        if output_attentions and len(encoder_outputs) > 2 and encoder_outputs[2] is not None:
+            final_outputs += (encoder_outputs[2],) # all_attentions
+        else:
+            final_outputs += (None,)
+
+        return final_outputs # sequence_output, pooled_output, (hidden_states), (attentions)
 
 
 # Adapted from BertCaptioningHeads
@@ -749,12 +902,12 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         self.cls_img_feat = RobertaIFPredictionHead(config) # Using Roberta's version
         self.loss_img_feat = RobertaImgFeatureLoss(config) # Using Roberta's version (or Bert's)
 
-        self.init_weights() # Call init_weights (it's _init_weights in PreTrainedModel)
+        self.init_weights()
         self.tie_weights()
 
-    def _init_weights(self, module): # Renamed from init_weights to _init_weights
-        super()._init_weights(module)
-        # Custom weight initialization if needed for captioning heads, etc.
+    # Removed _init_weights to rely on RobertaPreTrainedModel's _init_weights
+    # def _init_weights(self, module):
+    #     super()._init_weights(module)
 
     def tie_weights(self):
         if hasattr(self.config, 'tie_weights') and self.config.tie_weights:
@@ -792,83 +945,125 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         if is_decode:
             return self.generate(*args, **kwargs) # Needs adaptation from BertForImageCaptioning
         else:
-            return self.encode_forward(*args, **kwargs) # Needs adaptation
+            return self.encode_forward(*args, **kwargs)
 
-    def encode_forward(self, input_ids, img_feats, attention_mask,
-                       masked_pos=None, masked_ids=None,
-                       masked_pos_img=None, masked_token_img=None, # For image part prediction
-                       token_type_ids=None, position_ids=None, head_mask=None,
-                       is_training=True, encoder_history_states=None, # RoBERTa might use past_key_values
-                       inputs_embeds=None, output_attentions=None, output_hidden_states=None, return_dict=None # HF style
-                       ):
+    def encode_forward(self,
+                       input_ids=None, # Optional if inputs_embeds is used
+                       img_feats=None,
+                       attention_mask=None,
+                       masked_pos=None,
+                       masked_ids=None,
+                       masked_pos_img=None,
+                       masked_token_img=None,
+                       token_type_ids=None,
+                       position_ids=None,
+                       head_mask=None,
+                       is_training=True,
+                       encoder_history_states=None, # Will be mapped to past_key_values
+                       inputs_embeds=None,
+                       output_attentions=None,
+                       output_hidden_states=None,
+                       return_dict=None):
+
+        # Resolve output flags
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        # return_dict for RobertaImgModel call, not necessarily for this method's output
+        # return_dict_roberta_model = return_dict if return_dict is not None else self.config.use_return_dict
+        # RobertaImgModel now expects tuple output primarily based on its implementation.
+
         # Pass arguments to self.roberta (RobertaImgModel)
-        # Note: RoBERTa typically doesn't use token_type_ids. If RobertaImgModel handles it (e.g., by ignoring), it's fine.
-        # encoder_history_states might map to past_key_values in RoBERTa if used for auto-regressive decoding features.
         outputs = self.roberta(
             input_ids=input_ids,
-            img_feats=img_feats,
             attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
             position_ids=position_ids,
-            token_type_ids=token_type_ids, # RobertaEmbeddings might ignore this if not configured
             head_mask=head_mask,
-            # encoder_history_states=encoder_history_states, # Or map to past_key_values
             inputs_embeds=inputs_embeds,
+            img_feats=img_feats,
+            encoder_hidden_states=encoder_history_states, # Mapped to past_key_values in RobertaImgModel if past_key_values is None
+            # past_key_values will be derived from encoder_history_states if needed by RobertaImgModel
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            # return_dict=return_dict # RobertaImgModel will handle its own return type
+            return_dict=False # RobertaImgModel is expected to return a tuple (sequence_output, pooled_output, hidden_states, attentions)
         )
 
-        # Assuming outputs format is (sequence_output, pooled_output, ...) like BertImgModel
-        # sequence_output = outputs[0]
-        # pooled_output = outputs[1] # Not typically used directly by captioning head
-        # other_outputs = outputs[2:]
+        # outputs = (sequence_output, pooled_output, all_hidden_states, all_attentions)
+        sequence_output = outputs[0]
+        # pooled_output = outputs[1] # Not used in this method directly
+        roberta_model_other_outputs = outputs[2:] # (all_hidden_states, all_attentions)
 
-        # The rest of this method (masking, loss calculation) should be very similar to BertForImageCaptioning,
-        # just ensure indices and shapes match what RobertaImgModel and RobertaCaptioningHeads expect/produce.
-        
+        # Determine text sequence length for slicing
+        # If input_ids is available, use its shape. Otherwise, if masked_pos is available, use its shape.
+        # Fallback to assuming full sequence_output is text if neither is available (less robust).
+        if input_ids is not None:
+            text_seq_len = input_ids.shape[1]
+        elif inputs_embeds is not None and masked_pos is not None: # inputs_embeds might be only text part before cat with img
+             text_seq_len = masked_pos.shape[-1] # Assuming masked_pos corresponds to text part
+        elif inputs_embeds is not None: # If only inputs_embeds given, and it's pre-concat
+            text_seq_len = inputs_embeds.shape[1] # This might be text_seq_len if img_feats are separate
+            if img_feats is not None: # If img_feats also exist, inputs_embeds was only text part
+                pass
+            else: # If no img_feats, inputs_embeds is the whole sequence
+                text_seq_len = sequence_output.shape[1]
+        else: # Fallback, this case should ideally not be hit if inputs are proper
+            logger.warning("Cannot accurately determine text_seq_len. Assuming it's up to where image features might start if img_feats are present.")
+            text_seq_len = sequence_output.shape[1] - (img_feats.shape[1] if img_feats is not None else 0)
+
+
         if is_training:
-            # Ensure slicing and indexing are correct for combined text + image features if applicable
-            # sequence_output's shape depends on whether img_feats were concatenated in RobertaImgModel
-            # Assuming masked_pos refers to the text part if img_feats are concatenated.
-            text_sequence_output = outputs[0][:, :input_ids.shape[1], :] # Example: extract text part
+            text_sequence_output = sequence_output[:, :text_seq_len, :]
+            
+            # Masking for text part
+            if masked_pos is None or masked_ids is None:
+                raise ValueError("masked_pos and masked_ids are required for training.")
+            
+            # Ensure masked_pos is boolean or can be safely converted for indexing
+            if masked_pos.dtype != torch.bool:
+                effective_masked_pos = masked_pos == 1
+            else:
+                effective_masked_pos = masked_pos
+            
+            sequence_output_masked = text_sequence_output[effective_masked_pos, :]
 
-            # Masking logic from BertForImageCaptioning - needs careful check
-            sequence_output_masked = text_sequence_output[masked_pos == 1, :]
-            
-            class_logits = self.cls(sequence_output_masked) # Pass to RobertaCaptioningHeads
-            
-            # Ensure masked_ids are correctly shaped and filtered
-            valid_masked_ids = masked_ids[masked_ids != -1] # Filter padding
-            
-            masked_lm_loss = self.loss(class_logits.float(), valid_masked_ids) # Calculate loss
+            class_logits = self.cls(sequence_output_masked) # RobertaCaptioningHeads
 
+            valid_masked_ids = masked_ids[masked_ids != -1] # Filter out padding tokens (often -1 or -100)
+
+            masked_lm_loss = self.loss(class_logits.float(), valid_masked_ids) # RobertaCaptioningLoss
             total_loss = masked_lm_loss
 
-            # Image feature prediction part (if applicable and configured)
+            # Image feature prediction part (Optional)
             if masked_pos_img is not None and masked_token_img is not None:
-                # Assuming img_feats were concatenated and are at the end of outputs[0]
-                img_sequence_output = outputs[0][:, input_ids.shape[1]:, :] # Example: extract image part
-                img_output_masked = img_sequence_output[masked_pos_img == 1, :]
+                img_sequence_output = sequence_output[:, text_seq_len:, :]
                 
-                img_feat_logits = self.cls_img_feat(img_output_masked) # Pass to RobertaIFPredictionHead
-                # Ensure masked_token_img is correctly prepared for loss
-                masked_img_loss = self.loss_img_feat(img_feat_logits.float(), masked_token_img)
-                
-                # Combine losses (e.g., with a weighting factor)
-                img_loss_weight = getattr(self.config, 'img_loss_weight', 0.1) # Example weight
-                total_loss += img_loss_weight * masked_img_loss
-            
-            # Mimic BertForImageCaptioning's output tuple format
-            # (total_loss, class_logits_for_text, other_bert_outputs...)
-            # The exact content of other_bert_outputs depends on what RobertaImgModel returns after sequence_output and pooled_output
-            return (total_loss, class_logits,) + outputs[2:] # Adjust based on RobertaImgModel's actual return
+                if masked_pos_img.dtype != torch.bool:
+                    effective_masked_pos_img = masked_pos_img == 1
+                else:
+                    effective_masked_pos_img = masked_pos_img
 
-        else: # Not training, typically for inference or feature extraction
-            # Extract text part of the sequence output
-            text_sequence_output = outputs[0][:, :input_ids.shape[1], :]
-            class_logits = self.cls(text_sequence_output) # Get logits for the whole sequence
-            # Mimic BertForImageCaptioning's output tuple format
-            return (class_logits,) + outputs[2:] # Adjust based on RobertaImgModel's actual return
+                # Check if any image tokens are actually masked to avoid empty tensor issues
+                if torch.any(effective_masked_pos_img):
+                    img_output_masked = img_sequence_output[effective_masked_pos_img, :]
+                    if img_output_masked.shape[0] > 0: # Ensure some tokens were actually selected
+                        img_feat_logits = self.cls_img_feat(img_output_masked) # RobertaIFPredictionHead
+                        masked_img_loss = self.loss_img_feat(img_feat_logits.float(), masked_token_img[effective_masked_pos_img,:]) # Filter masked_token_img too
+
+                        img_loss_weight = getattr(self.config, 'img_loss_weight', 0.1)
+                        total_loss += img_loss_weight * masked_img_loss
+                    else:
+                        logger.warning("Masked image positions were specified, but resulted in no tokens being selected for loss calculation.")
+                else:
+                    logger.warning("No image tokens were masked for image feature prediction loss.")
+
+            return (total_loss, class_logits,) + roberta_model_other_outputs
+
+        else: # Not training (e.g., for feature extraction or validation logits)
+            text_sequence_output = sequence_output[:, :text_seq_len, :]
+            class_logits = self.cls(text_sequence_output) # Get logits for the whole text sequence
+            return (class_logits,) + roberta_model_other_outputs
 
     # The `generate` and related methods (`_generate_beam_search`, `_generate_no_beam_search`,
     # `prepare_inputs_for_generation`, `_decode_step`, etc.) from `BertForImageCaptioning`
@@ -954,51 +1149,301 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         return input_ids # Return generated sequences
 
 
-    # `prepare_inputs_for_generation` needs to be adapted from `BertForImageCaptioning`
-    # Placeholder - THIS NEEDS FULL ADAPTATION
+    def _decode_step(self, curr_ids, past_key_values, **kwargs_for_prepare):
+        """
+        Performs a single decoding step.
+        Used by beam search algorithms.
+        Adapts logic from BertForImageCaptioning._decode_step.
+
+        Args:
+            curr_ids: Tensor of current token sequences in the beam (batch_size * num_beams, current_length).
+            past_key_values: Cached key/value states from previous step.
+            **kwargs_for_prepare: Additional arguments that might be needed by prepare_inputs_for_generation,
+                                   though typically attributes set in `generate()` are used.
+        Returns:
+            Tuple of (logits for the next token, new_past_key_values).
+        """
+        # 1. Prepare inputs for the model for this decoding step
+        # `prepare_inputs_for_generation` uses `self` attributes like `self.img_feats`
+        # which are assumed to be set and beam-expanded by the main `generate` method.
+        # `kwargs_for_prepare` can supplement or override if needed, but often empty.
+        model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past_key_values, **kwargs_for_prepare)
+
+        # 2. Model Forward Pass
+        # `self.roberta` is RobertaImgModel. It should return past_key_values if use_cache=True.
+        # Expected output from RobertaImgModel when use_cache=True (set in model_inputs):
+        # (sequence_output, pooled_output, past_key_values_from_encoder, other_outputs...)
+        # The RobertaImgModel.forward was updated to return:
+        # (sequence_output, pooled_output, all_hidden_states_or_past_key_values, all_attentions)
+        # So, past_key_values should be in outputs[2] if use_cache=True and output_hidden_states=False (typical for generation)
+        outputs = self.roberta(**model_inputs)
+
+        sequence_output = outputs[0] # This is the output of RobertaImgModel's encoder for the current input slice
+
+        new_past_key_values = None
+        if model_inputs.get('use_cache', False):
+            if len(outputs) > 2 and outputs[2] is not None:
+                new_past_key_values = outputs[2]
+            else:
+                logger.warning("_decode_step: `use_cache` was True, but `new_past_key_values` is None or not found at outputs[2].")
+        elif len(outputs) > 2 and outputs[2] is not None : # Check if past_kv are there even if use_cache was false (should not happen with HF standard)
+             logger.warning("_decode_step: `use_cache` was False, but found unexpected past_key_values in output at index 2.")
+
+
+        # 3. Get Logits for Prediction
+        # The `sequence_output` from `self.roberta` corresponds to the `input_ids`
+        # prepared by `prepare_inputs_for_generation`.
+        # For generation, `input_ids` to `prepare_inputs_for_generation`
+        # is typically `[last_generated_token, MASK_TOKEN]` for subsequent steps,
+        # or `[BOS_TOKEN, MASK_TOKEN]` for the first step (potentially with OD labels too).
+
+        # `model_inputs['input_ids']` had shape (batch, step_seq_len)
+        # e.g., (batch, 2) for [token, MASK] or (batch, 2 + od_len) for [BOS, MASK, ODs]
+        # The MASK token is expected to be at index 1 of the text part of these input_ids.
+        mask_token_index = 1
+        # sequence_output has shape (batch, step_seq_len, hidden_size)
+        next_token_hidden_states = sequence_output[:, mask_token_index, :]
+
+        # `self.cls` is RobertaCaptioningHeads
+        logits = self.cls(next_token_hidden_states)
+
+        # 4. Return
+        return logits, new_past_key_values
+
+
     def prepare_inputs_for_generation(self, curr_ids, past=None, **kwargs):
-        # This method must be carefully adapted from BertForImageCaptioning.prepare_inputs_for_generation
-        # Key changes:
-        # - Use self.mask_token_id (RoBERTa's)
-        # - Construct inputs (input_ids, attention_mask, position_ids, etc.) compatible with self.roberta
-        # - Handle past_key_values if that's the mechanism RoBERTa uses for caching, instead of encoder_history_states.
-        logger.warning("RobertaForImageCaptioning.prepare_inputs_for_generation() is a placeholder and needs full adaptation.")
+        """
+        Prepares inputs for generation, carefully adapted from BertForImageCaptioning.
+        `kwargs` may contain `img_feats`, `attention_mask` etc. if not set as instance attributes by `generate`.
+        However, this implementation assumes they are instance attributes (`self.img_feats`, `self.full_attention_mask`, etc.)
+        set by the `generate` method, expanded for beams.
+        """
+        mask_token_id = self.config.mask_token_id # RoBERTa's mask token ID
+        batch_size = curr_ids.shape[0] # This is effective_batch_size (batch_size * num_beams * num_fsm_states * num_return_sequences)
 
-        # Conceptual adaptation:
-        mask_token_id = self.config.mask_token_id # Ensure this is correct for RoBERTa
-        batch_size = curr_ids.shape[0]
-        mask_ids = torch.full((batch_size, 1), mask_token_id, dtype=torch.long, device=curr_ids.device)
+        mask_ids = torch.full(
+            (batch_size, 1), mask_token_id, dtype=torch.long, device=curr_ids.device
+        )
 
-        # Logic for constructing input_ids, attention_mask, position_ids, token_type_ids (if used by RoBERTa model)
-        # This involves slicing and concatenating based on `past` (cached states) and current `curr_ids`.
-        # The exact details depend on how `BertForImageCaptioning` handles this and how it maps to RoBERTa's API.
+        # Helper to slice pre-computed full tensors.
+        # These tensors (e.g., self.full_masked_pos) have shape (effective_batch_size, full_max_len)
+        # where full_max_len = self.max_seq_len (text) + self.od_labels_len + self.img_seq_len (potentially)
+        # or just self.max_seq_len (text) + self.od_labels_len if image features are not part of these specific tensors.
+        # The original BERT code slices based on text sequence length for some parts.
 
-        # Example of creating input_ids (very simplified):
-        if past is None: # First step
-            input_ids = torch.cat([curr_ids, mask_ids], dim=1)
-            # ... other inputs like attention_mask, position_ids ...
-            # img_feats would be taken from kwargs or instance variables set up in `generate`
-            img_feats = kwargs.get('img_feats_for_generation') # Example: assume it's passed or stored
-        else: # Subsequent steps
-            # `past` would contain cached key-values. RoBERTa expects `past_key_values`
-            # The structure of `past` and how it's used needs to match RoBERTa's requirements.
-            input_ids = torch.cat([curr_ids[:, -1:], mask_ids], dim=1) # Take last generated token + mask
-            img_feats = None # Image features are usually processed only in the first step with past_key_values
-            # ... other inputs ...
+        # Effective length of text part of full_position_ids, full_token_type_ids etc.
+        # This usually corresponds to self.max_seq_len (max caption length).
+        # Let full_text_od_len = self.max_seq_len + self.od_labels_len
 
-        # Return a dictionary of inputs for self.roberta
-        # This is a placeholder return
-        return {
+        # The `_slice` and `_remove_elements` logic from original BERT:
+        # `_slice(t, start, end)` selected columns from start to end from a tensor `t` of shape (batch, full_text_od_len)
+        # `_remove_elements(t, start, end)` removed columns from start to end.
+
+        # These utility functions are specific to how BertForImageCaptioning structures its full tensors.
+        # Assuming they are available or adaptable if needed. For now, focusing on the core logic.
+
+        # Determine current text length (excluding BOS, MASK, OD_LABELS)
+        # curr_ids contains [BOS, token1, token2, ...]
+        # current_actual_text_len = curr_ids.shape[1] -1 # Number of actual text tokens generated so far
+
+        img_feats_for_step = None
+        past_key_values_for_step = past # `past` is the past_key_values from the previous step
+
+        if past is None: # First decoding step (after BOS)
+            # Input: [BOS, MASK] or [BOS, MASK, OD_LABELS]
+            input_ids = torch.cat([curr_ids, mask_ids], dim=1) # e.g., [BOS, MASK]
+            current_total_input_len = input_ids.shape[1] # Length of [BOS, MASK] = 2
+
+            # Attention mask, token_type_ids, position_ids need to cover [BOS, MASK, OD_LABELS, IMG_FEATS]
+            # self.full_attention_mask is (batch, full_len, full_len)
+            # We need to select the part relevant for [BOS, MASK, OD_LABELS, IMG_FEATS]
+            # The elements not yet generated (future text tokens) should be excluded from rows/cols.
+
+            # Example: if full sequence is [CLS TXT PAD OD IMG]
+            # Current input is [CLS MASK OD IMG]
+            # `seq_start_idx_in_full_mask` is where MASK begins in the text part of full_attention_mask
+            # `seq_end_idx_in_full_mask` is end of text part in full_attention_mask
+            seq_start_idx_in_full_mask = current_total_input_len -1 # -1 because MASK replaces the first actual token position
+            seq_end_idx_in_full_mask = self.max_seq_len # End of text part
+
+            # This is complex. BertImgModel's _remove_rows_cols needs exact indices.
+            # For simplicity here, we assume self.full_attention_mask, self.full_token_type_ids etc.
+            # are already prepared by `generate` to be of shape (batch_size, current_total_input_len + od_len + img_len, ...)
+            # and are correctly ordered. The slicing in Bert's `prepare_inputs` is very specific to its setup.
+            # Let's try a simplified adaptation:
+
+            # We need to construct an attention mask for the sequence:
+            # [curr_ids, mask_ids, (optional) od_label_ids] + img_feats
+            # The `RobertaImgModel.forward` will then create the extended_attention_mask.
+
+            # Length of text part for current step: curr_ids + mask_ids
+            current_text_part_len = input_ids.shape[1]
+            attention_mask_len = current_text_part_len
+
+            if self.add_od_labels:
+                input_ids = torch.cat([input_ids, self.od_label_ids], dim=1)
+                attention_mask_len += self.od_labels_len
+
+            if self.img_feats is not None: # Should be self.img_feats from generate()
+                img_feats_for_step = self.img_feats
+                attention_mask_len += self.img_seq_len
+
+            # Create a simple attention mask for this structure
+            # RobertaImgModel will extend it.
+            attention_mask = torch.ones((batch_size, attention_mask_len), device=curr_ids.device)
+
+            # position_ids:
+            # RoBERTa embeddings handle position_ids internally if not provided, based on input_ids.
+            # For generation, providing them explicitly, matching Bert's approach, can be more robust.
+            # Position IDs for [BOS, MASK]
+            position_ids = torch.arange(current_text_part_len, dtype=torch.long, device=curr_ids.device)
+            if self.add_od_labels:
+                # OD labels might have specific position IDs (e.g., starting from self.od_labels_start_posid)
+                # This needs to align with how RobertaEmbeddings handles position_ids if they are gappy.
+                # For now, assume contiguous or rely on RobertaEmbeddings' internal generation if None.
+                # Bert version: self.full_position_ids is sliced.
+                # Simplified: create position_ids for current input.
+                # If self.od_labels_start_posid is used, positions might be like [0, 1, 100, 101, ...]
+                # This requires RobertaEmbeddings to handle potentially non-contiguous absolute positions correctly.
+                od_pos_ids = torch.arange(self.od_labels_start_posid, self.od_labels_start_posid + self.od_labels_len, dtype=torch.long, device=curr_ids.device)
+                position_ids = torch.cat([position_ids, od_pos_ids], dim=0)
+            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+
+
+            # token_type_ids:
+            # For [BOS, MASK] + [OD_LABELS (if any)]
+            # RoBERTa typically doesn't use token_type_ids heavily (type_vocab_size=1).
+            # If used, text part is 0, OD labels could be 1 (or also 0).
+            token_type_ids_text_part = torch.zeros((batch_size, current_text_part_len), dtype=torch.long, device=curr_ids.device)
+            if self.add_od_labels:
+                # Assuming OD labels get a different type, e.g., 1, if type_vocab_size allows.
+                # Or all zeros if type_vocab_size is 1.
+                od_type = 1 if self.config.type_vocab_size > 1 else 0
+                token_type_ids_od_part = torch.full((batch_size, self.od_labels_len), od_type, dtype=torch.long, device=curr_ids.device)
+                token_type_ids = torch.cat([token_type_ids_text_part, token_type_ids_od_part], dim=1)
+            else:
+                token_type_ids = token_type_ids_text_part
+
+            # `self.prev_encoded_layers` (past_key_values cache) is None for the first step.
+            # The model call will generate the first set of past_key_values.
+            past_key_values_for_step = None
+            self.prev_encoded_layers = None # Reset cache for this sequence generation call
+
+        else: # Subsequent decoding steps (past is not None)
+            last_token = curr_ids[:, -1:]
+            input_ids = torch.cat([last_token, mask_ids], dim=1) # Input is [PrevToken, MASK]
+
+            # Position IDs for [PrevToken, MASK]
+            # PrevToken is at curr_ids.shape[1]-1, MASK is at curr_ids.shape[1]
+            # RobertaEmbeddings creates position_ids with offset, so relative positions matter.
+            # If curr_ids = [BOS, tok1], then PrevToken=tok1 (pos=1), MASK (pos=2)
+            # These positions are relative to the start of text.
+            # The `past_key_values_length` in RobertaEmbeddings.forward will handle the offset.
+            # So, we can pass position_ids for the current slice, e.g., [actual_pos_of_PrevToken, actual_pos_of_MASK]
+            # Or, let RobertaEmbeddings compute them based on `past_key_values_length`.
+            # For explicit control like Bert:
+            current_text_len_so_far = curr_ids.shape[1] # Includes BOS
+            # pos for PrevToken is (current_text_len_so_far - 1), pos for MASK is current_text_len_so_far
+            # These are 0-indexed from start of text.
+            # Example: curr_ids=[BOS, t1], current_text_len_so_far=2. PrevToken=t1 (at index 1). MASK will be at index 2.
+            # input_ids = [t1, MASK]
+            # position_ids should be [1, 2] (absolute, if RobertaEmbeddings handles padding_idx offset)
+            # Or, if RobertaEmbeddings needs relative to slice, and handles offset by past_key_values_length:
+            # position_ids = torch.arange(2L, device=curr_ids.device).unsqueeze(0) and then it adds offset.
+            # Let's defer to RobertaEmbeddings internal logic by setting position_ids = None,
+            # as it uses past_key_values_length.
+            position_ids = None
+
+            # token_type_ids for [PrevToken, MASK] - usually all 0s for RoBERTa text.
+            token_type_ids = torch.zeros_like(input_ids)
+
+            img_feats_for_step = None # Image features are in `past`
+
+            # `past` *is* the past_key_values.
+            # The complex logic in Bert's `prev_encoded_layers` re-shuffles these keys/values
+            # if OD labels and ImgFeats were part of the *initial* sequence passed to BERT layers.
+            # If RobertaImgModel's encoder receives concatenated text+image embeddings, then `past`
+            # already reflects this combined context.
+            # The re-ordering in Bert was: self.prev_encoded_layers = [torch.cat([x[:, 2:, :], x[:, :start_pos,:]], dim=1) for x in past]
+            # This implies the initial `past` had structure [BOS, TextTokenSoFar, OD_Labels, Img_Features].
+            # And it reordered to [OD_Labels, Img_Features, BOS, TextTokenSoFar] for caching.
+            # This is highly model-specific.
+            # For RoBERTa, if past_key_values are standard, they are layer-wise tuples of (key, value) tensors.
+            # Their sequence dimension corresponds to the *effective sequence length seen by the attention layers*.
+
+            # Assuming `past` is already in the correct format (tuple of layer_wise key/value tensors)
+            # and its sequence length matches the combined [Text, OD, Img] structure from the first pass.
+            past_key_values_for_step = past
+
+            # Attention mask for [PrevToken, MASK] given `past_key_values_for_step`.
+            # The length of items in past_key_values (dim 2 for key/value) indicates total items attended to previously.
+            # e.g., past_key_values[0][0].shape = (batch, num_heads, past_seq_len, head_size)
+            past_seq_len = past[0][0].shape[2] # Total length of what's in past_key_values
+            current_input_len = input_ids.shape[1] # Should be 2 for [Token, MASK]
+
+            # Attention mask should be (batch, current_input_len, past_seq_len + current_input_len)
+            # So [Token, MASK] can attend to everything in `past` and to `Token` (for MASK).
+            # MASK should attend to `Token` and `past`. `Token` should attend to `past`.
+            # Simplified: allow current inputs to attend to past and themselves appropriately.
+            # Standard generation attention mask:
+            attention_mask = torch.ones((batch_size, past_seq_len + current_input_len), device=curr_ids.device)
+            # The `RobertaImgModel.forward` will create the proper extended causal mask.
+            # For a slice being decoded, the attention_mask needs to be (batch_size, slice_len_with_past)
+            # No, `RobertaImgModel` receives `attention_mask` for the *current items* being passed if `past_key_values` is used.
+            # The shape should be (batch_size, current_input_len). The causal mask is built inside.
+            # However, for compatibility with BERT's `full_attention_mask` slicing:
+            # The original BERT code constructs a very specific attention_mask by slicing `self.full_attention_mask`.
+            # This implies a fixed, pre-computed global attention structure.
+            # If `past_key_values` are standard HF, the `attention_mask` for `model.forward`
+            # only needs to cover the *new* `input_ids` (e.g., shape `(batch_size, 1)` for the token being generated).
+            # The cached keys/values handle the past.
+
+            # Let's use the simplified approach for HF standard `past_key_values`:
+            # `input_ids` is just the new token (e.g. `curr_ids[:,-1:]` without MASK)
+            # `attention_mask` is just for this new token `torch.ones((batch_size, 1))`
+            # This part needs to align with how `_decode_step` calls this and the model.
+            # The Bert `_decode_step` uses `[last_token, mask_ids]`.
+            # So, `attention_mask` for these two tokens, allowing them to see `past`.
+            attention_mask = torch.ones((batch_size, input_ids.shape[1] + past_seq_len), device=curr_ids.device)
+            # This mask will be extended by `RobertaImgModel` to 4D.
+            # It needs to be `(batch_size, current_input_ids_len, total_attended_len)` for triangular if no past_kv.
+            # With `past_kv`, it's usually `(batch_size, current_input_ids_len)`.
+            # Let's assume `RobertaImgModel` will handle it if `past_key_values` is not None.
+            # The minimal mask is `torch.ones_like(input_ids)`.
+            # The existing `RobertaImgModel` will then extend this.
+            # If `past_key_values` is not None, `attention_mask` in `RobertaEncoder` is for the query sequence.
+            # `extended_attention_mask` is `attention_mask[:, None, None, :]`
+            # `key_layer = torch.cat([past_key_value[0], key_layer], dim=2)`
+            # `attention_scores = attention_scores + attention_mask` (this mask should be for query vs key+past_key)
+            # This implies `attention_mask` needs to be `(B, QuerySeqLen, KeySeqLen)`
+            # This is getting too complex without knowing `_decode_step` structure.
+            # Reverting to BERT's slicing logic for `attention_mask` is safer if `full_attention_mask` is structured similarly.
+            # BERT uses: `attention_mask = self.full_attention_mask[:, od_len+img_len+start_pos : od_len+img_len+end_pos, :od_len+img_len+end_pos]`
+            # This implies `full_attention_mask` is (B, FullCombined, FullCombined).
+            # This requires `self.od_labels_len`, `self.img_seq_len` to be accurate.
+            # For now, this part of attention_mask for past!=None is a placeholder needing robust test.
+            # A common pattern for HF generation with past_kv is just `attention_mask = torch.ones((batch_size, 1), ...)` for the new token.
+            # But since our input_ids is `[last_token, mask_ids]`, it's (batch, 2).
+            attention_mask = torch.ones_like(input_ids) # Simplest form, assumes model handles past internally.
+
+        model_inputs = {
             'input_ids': input_ids,
-            'img_feats': img_feats, # May be None after first step if using past_key_values
-            'attention_mask': kwargs.get('attention_mask_for_generation'), # Needs to be correctly constructed
-            # 'token_type_ids': ..., # If RoBERTa model uses them
-            # 'position_ids': ...,
-            # 'past_key_values': past, # If `past` maps to RoBERTa's past_key_values
-            'is_training': False, # Explicitly set for generation
+            'attention_mask': attention_mask,
+            'position_ids': position_ids, # Can be None to let RobertaEmbeddings compute it
+            'token_type_ids': token_type_ids, # Can be None if RoBERTa doesn't use them
+            'past_key_values': past_key_values_for_step,
+            'img_feats': img_feats_for_step, # None after first step if info is in past_key_values
+
+            # Control flags for model.forward()
+            'output_attentions': False,
+            'output_hidden_states': False,
+            'use_cache': True, # Critical for generation
+            # 'is_training': False, # Model should be in eval mode if called from generate
         }
+        return model_inputs
 
     # prod_generate and prod_no_hidden_generate also need adaptation from BertForImageCaptioning
+    # These are specialized versions of `generate`
     # Placeholder - THESE NEED FULL ADAPTATION
     def prod_generate(self, *args, **kwargs):
         logger.warning("RobertaForImageCaptioning.prod_generate() needs full adaptation.")
