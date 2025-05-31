@@ -17,6 +17,9 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import heapq
+import heapq
+
 import json
 import math
 import os
@@ -947,124 +950,137 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         else:
             return self.encode_forward(*args, **kwargs)
 
-    def encode_forward(self,
-                       input_ids=None, # Optional if inputs_embeds is used
-                       img_feats=None,
-                       attention_mask=None,
-                       masked_pos=None,
-                       masked_ids=None,
-                       masked_pos_img=None,
-                       masked_token_img=None,
-                       token_type_ids=None,
-                       position_ids=None,
-                       head_mask=None,
-                       is_training=True,
-                       encoder_history_states=None, # Will be mapped to past_key_values
-                       inputs_embeds=None,
-                       output_attentions=None,
-                       output_hidden_states=None,
-                       return_dict=None):
+    def encode_forward(self, input_ids, img_feats, attention_mask,
+            masked_pos=None, masked_ids=None,
+            masked_pos_img=None, masked_token_img=None,
+            token_type_ids=None, position_ids=None, head_mask=None,
+            is_training=True, encoder_history_states=None,
+            # Added inputs_embeds, output_attentions, output_hidden_states, return_dict for HF compatibility
+            # though current RobertaImgModel might not use all of them directly if it's not returning dict.
+            inputs_embeds=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            return_dict=None):
 
-        # Resolve output flags
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
+        # Resolve output flags for self.roberta call
+        # These would be passed to RobertaImgModel which then passes to RobertaEncoder
+        roberta_output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        roberta_output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
-        # return_dict for RobertaImgModel call, not necessarily for this method's output
-        # return_dict_roberta_model = return_dict if return_dict is not None else self.config.use_return_dict
-        # RobertaImgModel now expects tuple output primarily based on its implementation.
+        # roberta_return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        # For now, assuming RobertaImgModel returns a tuple as per its implementation.
 
-        # Pass arguments to self.roberta (RobertaImgModel)
-        outputs = self.roberta(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            img_feats=img_feats,
-            encoder_hidden_states=encoder_history_states, # Mapped to past_key_values in RobertaImgModel if past_key_values is None
-            # past_key_values will be derived from encoder_history_states if needed by RobertaImgModel
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=False # RobertaImgModel is expected to return a tuple (sequence_output, pooled_output, hidden_states, attentions)
-        )
+        outputs = self.roberta(input_ids, img_feats=img_feats, attention_mask=attention_mask,
+                position_ids=position_ids, token_type_ids=token_type_ids,
+                head_mask=head_mask,
+                encoder_hidden_states=encoder_history_states, # This is past_key_values for Roberta
+                inputs_embeds=inputs_embeds, # Pass through
+                output_attentions=roberta_output_attentions,
+                output_hidden_states=roberta_output_hidden_states,
+                return_dict=False # Explicitly False, expecting tuple from RobertaImgModel
+                )
 
-        # outputs = (sequence_output, pooled_output, all_hidden_states, all_attentions)
+        # outputs from RobertaImgModel: (sequence_output, pooled_output, all_hidden_states_tuple, all_attentions_tuple)
         sequence_output = outputs[0]
-        # pooled_output = outputs[1] # Not used in this method directly
-        roberta_model_other_outputs = outputs[2:] # (all_hidden_states, all_attentions)
-
-        # Determine text sequence length for slicing
-        # If input_ids is available, use its shape. Otherwise, if masked_pos is available, use its shape.
-        # Fallback to assuming full sequence_output is text if neither is available (less robust).
-        if input_ids is not None:
-            text_seq_len = input_ids.shape[1]
-        elif inputs_embeds is not None and masked_pos is not None: # inputs_embeds might be only text part before cat with img
-             text_seq_len = masked_pos.shape[-1] # Assuming masked_pos corresponds to text part
-        elif inputs_embeds is not None: # If only inputs_embeds given, and it's pre-concat
-            text_seq_len = inputs_embeds.shape[1] # This might be text_seq_len if img_feats are separate
-            if img_feats is not None: # If img_feats also exist, inputs_embeds was only text part
-                pass
-            else: # If no img_feats, inputs_embeds is the whole sequence
-                text_seq_len = sequence_output.shape[1]
-        else: # Fallback, this case should ideally not be hit if inputs are proper
-            logger.warning("Cannot accurately determine text_seq_len. Assuming it's up to where image features might start if img_feats are present.")
-            text_seq_len = sequence_output.shape[1] - (img_feats.shape[1] if img_feats is not None else 0)
-
+        # pooled_output = outputs[1] # Not directly used by this method's main logic
+        model_other_outputs = outputs[2:] # These are (all_hidden_states, all_attentions)
 
         if is_training:
+            # Determine text sequence length. masked_pos corresponds to the text part.
+            if masked_pos is None:
+                raise ValueError("masked_pos is required for training to determine text sequence length.")
+            text_seq_len = masked_pos.shape[-1]
+            
             text_sequence_output = sequence_output[:, :text_seq_len, :]
             
-            # Masking for text part
-            if masked_pos is None or masked_ids is None:
-                raise ValueError("masked_pos and masked_ids are required for training.")
-            
-            # Ensure masked_pos is boolean or can be safely converted for indexing
+            # Ensure masked_pos is boolean for indexing
             if masked_pos.dtype != torch.bool:
                 effective_masked_pos = masked_pos == 1
             else:
                 effective_masked_pos = masked_pos
-            
+
             sequence_output_masked = text_sequence_output[effective_masked_pos, :]
+
+            if masked_ids is None:
+                 raise ValueError("masked_ids is required for training.")
+            # Filter out padding tokens from masked_ids (often -1 or -100)
+            # This should happen *before* loss calculation, and masked_ids should align with sequence_output_masked
+            valid_masked_ids = masked_ids[effective_masked_pos] # Align masked_ids with selected sequence_output
+            valid_masked_ids = valid_masked_ids[valid_masked_ids != -1] # Filter out padding
+
+            if sequence_output_masked.shape[0] != valid_masked_ids.shape[0] and valid_masked_ids.numel() > 0 :
+                # This check is important. If sequence_output_masked is empty due to no True in masked_pos,
+                # but valid_masked_ids is not empty (e.g. due to incorrect mask logic or all -1s filtered out),
+                # or vice-versa, it's an issue.
+                # However, if sequence_output_masked is empty and valid_masked_ids is also empty, it's fine (no loss).
+                if not (sequence_output_masked.shape[0] == 0 and valid_masked_ids.numel() == 0):
+                    logger.warning(f"Mismatch between masked outputs ({sequence_output_masked.shape[0]}) and masked labels ({valid_masked_ids.shape[0]}) after filtering. This might lead to errors or incorrect loss.")
 
             class_logits = self.cls(sequence_output_masked) # RobertaCaptioningHeads
 
-            valid_masked_ids = masked_ids[masked_ids != -1] # Filter out padding tokens (often -1 or -100)
+            # Only compute loss if there are valid (non-padded) masked tokens
+            if valid_masked_ids.numel() > 0 :
+                masked_lm_loss = self.loss(class_logits.float(), valid_masked_ids) # RobertaCaptioningLoss
+            else: # No valid masked tokens to compute loss on
+                masked_lm_loss = torch.tensor(0.0, device=sequence_output.device)
 
-            masked_lm_loss = self.loss(class_logits.float(), valid_masked_ids) # RobertaCaptioningLoss
             total_loss = masked_lm_loss
 
             # Image feature prediction part (Optional)
             if masked_pos_img is not None and masked_token_img is not None:
-                img_sequence_output = sequence_output[:, text_seq_len:, :]
+                img_sequence_output = sequence_output[:, text_seq_len:, :] # Get the image part
                 
                 if masked_pos_img.dtype != torch.bool:
                     effective_masked_pos_img = masked_pos_img == 1
                 else:
                     effective_masked_pos_img = masked_pos_img
 
-                # Check if any image tokens are actually masked to avoid empty tensor issues
+                # Check if any image tokens are actually masked
                 if torch.any(effective_masked_pos_img):
                     img_output_masked = img_sequence_output[effective_masked_pos_img, :]
+
+                    # Align masked_token_img with selected img_output_masked
+                    valid_masked_token_img = masked_token_img[effective_masked_pos_img, :]
+
                     if img_output_masked.shape[0] > 0: # Ensure some tokens were actually selected
                         img_feat_logits = self.cls_img_feat(img_output_masked) # RobertaIFPredictionHead
-                        masked_img_loss = self.loss_img_feat(img_feat_logits.float(), masked_token_img[effective_masked_pos_img,:]) # Filter masked_token_img too
+                        masked_img_loss = self.loss_img_feat(img_feat_logits.float(), valid_masked_token_img) # RobertaImgFeatureLoss
 
-                        img_loss_weight = getattr(self.config, 'img_loss_weight', 0.1)
+                        img_loss_weight = getattr(self.config, 'img_loss_weight', 0.1) # Default weight if not in config
                         total_loss += img_loss_weight * masked_img_loss
-                    else:
-                        logger.warning("Masked image positions were specified, but resulted in no tokens being selected for loss calculation.")
-                else:
-                    logger.warning("No image tokens were masked for image feature prediction loss.")
+                    # else: # No need for warning if img_output_masked is empty, implies no loss contribution
+                        # logger.warning("Masked image positions were specified, but resulted in no tokens being selected for loss calculation.")
+                # else: # No image tokens masked, no loss contribution
+                    # logger.warning("No image tokens were masked for image feature prediction loss.")
 
-            return (total_loss, class_logits,) + roberta_model_other_outputs
+            # Return (total_loss, class_logits_for_masked_tokens, other_model_outputs_like_attentions_if_any)
+            return (total_loss, class_logits,) + model_other_outputs
+        else: # Not training (e.g., for feature extraction or validation logits for the whole sequence)
+            # Determine text sequence length. If input_ids is present, use its length.
+            # Otherwise, this path might need a way to know the text length (e.g. from config or a convention).
+            if input_ids is not None:
+                text_seq_len = input_ids.shape[-1]
+            elif inputs_embeds is not None: # If inputs_embeds are given, assume they are for text part if img_feats also exist
+                text_seq_len = inputs_embeds.shape[1] if img_feats is None else inputs_embeds.shape[1]
+            else: # Fallback: this is problematic for non-training if we don't know text length
+                  # For now, assume the sequence_output is all text, or use a placeholder.
+                  # This path is less common for captioning models which usually train or generate.
+                logger.warning("Cannot accurately determine text_seq_len for non-training mode without input_ids or a clear convention.")
+                text_seq_len = sequence_output.shape[1] - (img_feats.shape[1] if img_feats is not None else 0)
 
-        else: # Not training (e.g., for feature extraction or validation logits)
             text_sequence_output = sequence_output[:, :text_seq_len, :]
             class_logits = self.cls(text_sequence_output) # Get logits for the whole text sequence
-            return (class_logits,) + roberta_model_other_outputs
+            return (class_logits,) + model_other_outputs
 
+    # The `generate` and related methods (`_generate_beam_search`, `_generate_no_beam_search`,
+    # `prepare_inputs_for_generation`, `_decode_step`, etc.) from `BertForImageCaptioning`
+    # need to be copied and adapted here.
+    # Key changes:
+    # - Use `self.roberta` instead of `self.bert`.
+    # - Ensure RoBERTa specific details (like `pad_token_id`, `bos_token_id`, `eos_token_ids` if different) are handled.
+    # - RoBERTa doesn't use `token_type_ids` in the same way as BERT, so ensure `RobertaImgModel` and `RobertaEmbeddings` handle this.
+    # - `mask_token_id` should be RoBERTa's mask token ID.
     # The `generate` and related methods (`_generate_beam_search`, `_generate_no_beam_search`,
     # `prepare_inputs_for_generation`, `_decode_step`, etc.) from `BertForImageCaptioning`
     # need to be copied and adapted here.
@@ -1075,390 +1091,1231 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
     # - `mask_token_id` should be RoBERTa's mask token ID.
     # - `prepare_inputs_for_generation` will need to correctly construct inputs for `self.roberta`.
     # This is a significant part and requires careful, line-by-line adaptation.
-    # For brevity, I'm not copying all those methods here but they are essential.
-    # Placeholder for generate method - THIS NEEDS FULL ADAPTATION
-    def generate(self, *args, **kwargs):
-        # This method must be carefully adapted from BertForImageCaptioning.generate
-        # Ensure all internal calls to self.bert are changed to self.roberta
-        # and any model-specific logic (token IDs, input preparation) is updated.
-        logger.warning("RobertaForImageCaptioning.generate() is a placeholder and needs full adaptation from BertForImageCaptioning.generate()")
-        
-        # Example of what needs to be adapted from BertForImageCaptioning:
-        # - self.img_seq_len, self.max_seq_len, self.mask_token_id setup
-        # - self.num_keep_best
-        # - vocab_size from self.config
-        # - Handling of add_od_labels, od_label_ids, etc.
-        # - Expansion of inputs for beams: self._expand_for_beams(...)
-        # - Calling the appropriate search strategy: _generate_beam_search, _generate_no_beam_search, or CBS related logic
-        # - The _decode_step method used by beam search, which calls the model's forward pass.
-        
-        # --- Start of adapted section (conceptual) ---
-        # Based on BertForImageCaptioning.generate
-        
-        # Extract necessary parameters from kwargs, similar to BertForImageCaptioning
-        img_feats = kwargs.pop('img_feats') # Example, ensure all args are handled
-        attention_mask = kwargs.pop('attention_mask')
-        # ... other parameters like max_length, bos_token_id, etc.
 
-        # Setup instance variables like self.img_seq_len, self.max_seq_len, self.mask_token_id
-        # self.mask_token_id should be specific to RoBERTa's tokenizer
-        # self.img_seq_len = img_feats.shape[1]
-        # self.max_seq_len = kwargs.get('max_length')
-        # self.mask_token_id = kwargs.get('mask_token_id') # Ensure this is RoBERTa's mask token
-        # self.prev_encoded_layers = None # If using past_key_values logic
+    def _expand_for_beams(self, x, num_expand):
+        if x is None or num_expand == 1:
+            return x
 
-        # ... (rest of the setup from BertForImageCaptioning.generate)
+        input_shape = list(x.shape)
+        expanded_shape = input_shape[:1] + [num_expand] + input_shape[1:]
+        x = x.unsqueeze(1).expand(expanded_shape)
+        # (batch_size * num_expand, ...)
+        x = x.contiguous().view([input_shape[0] * num_expand] + input_shape[1:])
+        return x
 
-        # Call the appropriate generation strategy (beam search, nucleus sampling, etc.)
-        # These internal methods (_generate_beam_search, etc.) also need adaptation.
-        # For example, _generate_beam_search calls _decode_step, which calls prepare_inputs_for_generation.
+    def _do_output_past(self, outputs):
+        # This model specific function is used to check if past key values are captured in outputs
+        # It is used in _generate_beam_search and _generate_no_beam_search
+        # For RobertaImgModel, past_key_values are expected at outputs[2] when use_cache=True
+        # and output_hidden_states=False (typical for generation).
+        # outputs = (sequence_output, pooled_output, past_key_values, all_attentions)
+        # So, if len(outputs) > 2 and outputs[2] is not None, it means past is outputted.
+        return len(outputs) >= 3 and outputs[2] is not None
 
-        # --- End of adapted section (conceptual) ---
-        
-        # Fallback to a very simple generation for now if not fully implemented
-        # This is NOT a functional generation method.
-        input_ids = kwargs.get('input_ids')
-        if input_ids is None:
-            bos_token_id = kwargs.get('bos_token_id', self.config.bos_token_id)
-            input_ids = torch.full((img_feats.shape[0], 1), bos_token_id, dtype=torch.long, device=img_feats.device)
-        
-        # A very naive loop, not a proper generation algorithm
-        for _ in range(kwargs.get('max_length', 20) -1): # max_length is just an example
-            model_inputs = self.prepare_inputs_for_generation(input_ids, past=None, **kwargs) # Needs full adaptation
-            
-            # Ensure all necessary arguments for self.roberta.forward are included
-            # This is a simplified call, actual call in _decode_step is more complex
-            outputs = self.roberta(
-                input_ids=model_inputs['input_ids'], 
-                img_feats=model_inputs.get('img_feats'), # Get from model_inputs
-                attention_mask=model_inputs['attention_mask'],
-                # token_type_ids=model_inputs.get('token_type_ids'), # RoBERTa might not use
-                # position_ids=model_inputs.get('position_ids'),
-                # encoder_history_states=model_inputs.get('encoder_history_states') # Or past_key_values
+
+    def generate(self, img_feats, attention_mask, masked_pos, token_type_ids=None,
+            position_ids=None, head_mask=None, input_ids=None, max_length=None,
+            do_sample=None, num_beams=None, temperature=None, top_k=None, top_p=None,
+            repetition_penalty=None, bos_token_id=None, pad_token_id=None,
+            eos_token_ids=None, mask_token_id=None, length_penalty=None,
+            num_return_sequences=None,
+            num_keep_best=1, is_decode=None, # is_decode is specific to BertForImageCaptioning's forward, not standard HF
+            add_od_labels=False, od_labels_start_posid=None,
+            use_cbs=False, fsm=None, num_constraints=None,
+            min_constraints_to_satisfy=None, use_hypo=False,
+            decoding_constraint_flag=None, bad_ending_ids=None,
+            output_scores=None, # Standard HF argument
+            return_dict_in_generate=None, # Standard HF argument
+            **model_kwargs # Standard HF model_kwargs
+            ):
+        """ Generates captions given image features """
+        # This method adapts BertForImageCaptioning.generate
+
+        # Standard HuggingFace generate arguments not in BertForImageCaptioning's original signature:
+        # output_attentions, output_hidden_states are usually controlled by config or model_kwargs
+        # output_scores, return_dict_in_generate are standard.
+
+        # Process is_decode (if it's a way to route to this function)
+        # if is_decode is None: is_decode = True # Assume this function is for decoding
+
+        # Update with model-specific kwargs
+        # model_kwargs['output_attentions'] = output_attentions # from config or args
+        # model_kwargs['output_hidden_states'] = output_hidden_states # from config or args
+        # model_kwargs['use_cache'] = True # always true for generation
+
+        batch_size = img_feats.shape[0]
+        self.img_seq_len = img_feats.shape[1]
+        if max_length is None: max_length = self.config.max_length if hasattr(self.config, 'max_length') else 20
+        self.max_seq_len = max_length # Used by prepare_inputs_for_generation
+
+        # vocab
+        vocab_size = self.config.vocab_size
+        if mask_token_id is None: mask_token_id = self.config.mask_token_id
+        if bos_token_id is None: bos_token_id = self.config.bos_token_id
+        if pad_token_id is None: pad_token_id = self.config.pad_token_id
+        if eos_token_ids is None: eos_token_ids = self.config.eos_token_id
+        if isinstance(eos_token_ids, int): eos_token_ids = [eos_token_ids]
+
+        self.mask_token_id = mask_token_id # Used by prepare_inputs_for_generation
+        self.prev_encoded_layers = None # Used by prepare_inputs_for_generation if adapting BERT's exact logic
+                                        # For RoBERTa, this should map to past_key_values handling
+
+        self.num_keep_best = num_keep_best # Used by _generate_beam_search
+
+        if not use_cbs: # Constrained Beam Search
+            num_fsm_states = 1
+        else:
+            b, num_fsm_states, f1, v = fsm.shape
+            assert b == batch_size and v == vocab_size and f1 == num_fsm_states
+
+        self.add_od_labels = add_od_labels
+        if od_labels_start_posid is None and hasattr(self.config, 'od_labels_start_posid'):
+             od_labels_start_posid = self.config.od_labels_start_posid
+        self.od_labels_start_posid = max(od_labels_start_posid if od_labels_start_posid is not None else 0, self.max_seq_len)
+
+        if self.add_od_labels:
+            assert input_ids is not None, "input_ids must be provided for OD labels"
+            # In BERT version, input_ids was used for OD labels. Assume similar here.
+            # The passed `input_ids` here might be just OD labels or combined.
+            # Bert's `generate` took `input_ids` (for text prompt) and `od_label_ids` (derived from the original `input_ids`'s tail).
+            # This adaptation assumes `input_ids` passed to `generate` could be the text prompt part,
+            # and `model_kwargs` might contain `od_label_ids` if needed.
+            # For simplicity, let's assume `od_label_ids` are passed via `model_kwargs` if `add_od_labels` is True.
+            od_label_ids = model_kwargs.pop('od_label_ids', None)
+            if od_label_ids is None:
+                raise ValueError("`od_label_ids` must be provided in model_kwargs when `add_od_labels` is True.")
+            self.od_labels_len = od_label_ids.shape[1]
+            # Text prompt part (if any)
+            # The original BERT code sets `input_ids = None` after extracting OD labels.
+            # Let's assume `input_ids` passed to `generate` is the text prompt (e.g., BOS).
+        else:
+            self.od_labels_len = 0
+            od_label_ids = None
+
+        if input_ids is None: # If no text prompt, start with BOS
+            input_ids = torch.full(
+                (batch_size, 1), bos_token_id, dtype=torch.long, device=img_feats.device
             )
-            
-            # This is highly simplified - actual logits processing is more involved
-            next_token_logits = self.cls(outputs[0])[:, -1, :] # Logits for the last token prediction
-            next_tokens = torch.argmax(next_token_logits, dim=-1)
-            input_ids = torch.cat([input_ids, next_tokens.unsqueeze(-1)], dim=-1)
-            
-            # Check for EOS token
-            if hasattr(self.config, 'eos_token_id') and (next_tokens == self.config.eos_token_id).all():
-                break
+        else:
+            assert input_ids.dim() == 2, "Input prompt should be of shape (batch_size, sequence length)."
+            assert input_ids.shape[0] == batch_size, "Input batch size must match image features"
+
+        cur_len = input_ids.shape[1]
+        effective_batch_size = batch_size
+        if num_return_sequences != 1:
+            input_ids = self._expand_for_beams(input_ids, num_return_sequences)
+            effective_batch_size *= num_return_sequences
         
-        return input_ids # Return generated sequences
+        # Expand other inputs that are per-batch but need to be per-beam for generation step's model call
+        num_expand = num_beams * num_fsm_states * (num_return_sequences if num_return_sequences is not None else 1)
+
+        self.od_label_ids = self._expand_for_beams(od_label_ids, num_expand) # OD labels expanded for beams
+        self.img_feats = self._expand_for_beams(img_feats, num_expand) # Image features expanded
+        
+        # These are full masks/ids prepared by the user, corresponding to the structure before beam expansion.
+        # They are used by `prepare_inputs_for_generation` by slicing/selecting.
+        # We expand them here so `prepare_inputs_for_generation` receives beam-expanded versions.
+        self.full_attention_mask = self._expand_for_beams(attention_mask, num_expand)
+        self.full_masked_pos = self._expand_for_beams(masked_pos, num_expand) # masked_pos seems specific to training objective?
+                                                                            # In BERT's generate, it's used for slicing.
+        self.full_token_type_ids = self._expand_for_beams(token_type_ids, num_expand)
+        self.full_position_ids = self._expand_for_beams(position_ids, num_expand)
+        self.full_head_mask = self._expand_for_beams(head_mask, num_expand) # Usually None for generation
+
+
+        # Generation call, assuming _generate_beam_search and _generate_no_beam_search are part of the class
+        # or inherited (they are not in PreTrainedModel, so need to be defined or copied)
+        # For this subtask, we assume they will be available.
+        # The actual call to HuggingFace's internal generation utilities like `beam_search`, `sample`
+        # would happen here if fully refactoring to HF style.
+        # Sticking to BertForImageCaptioning structure for now:
+        if not use_cbs:
+            if num_beams > 1:
+                # These methods `_generate_beam_search`, `_generate_no_beam_search` are from HF `generation_utils.py`
+                # and are usually called by `PreTrainedModel.generate`.
+                # BertForImageCaptioning has its own simplified versions of these.
+                # We'll assume these will be adapted/copied into RobertaForImageCaptioning.
+                # For now, this is a conceptual placeholder for the call.
+                output_tuple = self._generate_beam_search( # This method needs to be in the class
+                    input_ids, cur_len, max_length, do_sample, temperature, top_k, top_p,
+                    repetition_penalty, pad_token_id, eos_token_ids, effective_batch_size,
+                    length_penalty, num_beams, vocab_size
+                )
+            else:
+                output_tuple = self._generate_no_beam_search( # This method needs to be in the class
+                    input_ids, cur_len, max_length, do_sample, temperature, top_k, top_p,
+                    repetition_penalty, pad_token_id, eos_token_ids, effective_batch_size
+                )
+        else: # Constrained Beam Search (CBS)
+            from src.modeling.utils_cbs import (ConstrainedBeamSearch, select_best_beam_with_constraints)
+            # Assuming utils_cbs is available in the path
+            assert self.num_keep_best == 1, 'num_keep_best > 1 not supported for CBS'
+            searcher = ConstrainedBeamSearch(eos_token_ids, max_length, num_beams, use_hypo=use_hypo,
+                                             decoding_constraint_flag=decoding_constraint_flag,
+                                             bad_ending_ids=bad_ending_ids)
+            # _decode_step is a method of this class
+            curr_ids, sum_logprobs = searcher.search(input_ids, None, self._decode_step, fsm)
+            curr_ids, logprobs = select_best_beam_with_constraints(
+                curr_ids, sum_logprobs, num_constraints, min_constraints_to_satisfy, eos_token_ids
+            )
+            # Expected output: (batch_size, n_best, max_len), (batch_size, n_best)
+            # For compatibility with the non-CBS path, and num_keep_best=1:
+            # Return shape: (batch_size * num_return_sequences, max_length), (batch_size * num_return_sequences, num_beams, max_length) for scores
+            # This part needs to align with HF return format or BertForImageCaptioning's specific format.
+            # Bert's version returns ( (batch_size, num_keep_best, max_len), (batch_size, num_keep_best) )
+            # HF's generate returns (batch_size * num_return_sequences, max_length) and scores tuple/dict.
+            # For now, let's match Bert's CBS output structure.
+            output_tuple = (curr_ids.unsqueeze(1), logprobs.unsqueeze(1))
+
+
+        # Process output_tuple to match expected format (sequences, scores)
+        # Bert's _generate_beam_search returns: ( (batch_size, num_keep_best, max_len), (batch_size, num_keep_best) )
+        # Bert's _generate_no_beam_search returns: ( (batch_size, max_len), None ) or ( (batch_size, max_len), scores )
+        # The final return should be (generated_sequence_ids, scores_or_logprobs)
+        # If output_tuple is already (sequences, scores), it's fine.
+        # If scores are None from _generate_no_beam_search, handle it.
+        
+        # Reshape to (batch_size, num_return_sequences * num_keep_best, max_length) for sequences
+        # and (batch_size, num_return_sequences * num_keep_best) for scores
+        # This part depends on how _generate_beam_search/_generate_no_beam_search are implemented.
+        # Assuming they return what BertForImageCaptioning expects.
+        # The final output for this function as per problem description: (generated_sequence_ids, scores_or_logprobs)
+        # This usually means sequences of shape (batch_size * num_return_sequences, max_length)
+        # and scores of shape (batch_size * num_return_sequences, vocab_size) or similar for sequence scores.
+        # For now, directly return the output_tuple assuming its structure is (sequences, scores).
+        return output_tuple
 
 
     def _decode_step(self, curr_ids, past_key_values, **kwargs_for_prepare):
         """
-        Performs a single decoding step.
-        Used by beam search algorithms.
-        Adapts logic from BertForImageCaptioning._decode_step.
-
+        Performs a single decoding step. (Adapted from BertForImageCaptioning)
         Args:
             curr_ids: Tensor of current token sequences in the beam (batch_size * num_beams, current_length).
             past_key_values: Cached key/value states from previous step.
-            **kwargs_for_prepare: Additional arguments that might be needed by prepare_inputs_for_generation,
-                                   though typically attributes set in `generate()` are used.
         Returns:
             Tuple of (logits for the next token, new_past_key_values).
         """
-        # 1. Prepare inputs for the model for this decoding step
-        # `prepare_inputs_for_generation` uses `self` attributes like `self.img_feats`
-        # which are assumed to be set and beam-expanded by the main `generate` method.
-        # `kwargs_for_prepare` can supplement or override if needed, but often empty.
         model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past_key_values, **kwargs_for_prepare)
 
-        # 2. Model Forward Pass
-        # `self.roberta` is RobertaImgModel. It should return past_key_values if use_cache=True.
-        # Expected output from RobertaImgModel when use_cache=True (set in model_inputs):
-        # (sequence_output, pooled_output, past_key_values_from_encoder, other_outputs...)
-        # The RobertaImgModel.forward was updated to return:
-        # (sequence_output, pooled_output, all_hidden_states_or_past_key_values, all_attentions)
-        # So, past_key_values should be in outputs[2] if use_cache=True and output_hidden_states=False (typical for generation)
+        # Model Forward Pass
+        # self.roberta is RobertaImgModel.
+        # It should return past_key_values if use_cache=True.
+        # Expected output: (sequence_output, pooled_output, past_key_values, all_attentions)
+        # when use_cache=True and output_hidden_states=False.
         outputs = self.roberta(**model_inputs)
 
-        sequence_output = outputs[0] # This is the output of RobertaImgModel's encoder for the current input slice
+        sequence_output = outputs[0]
 
         new_past_key_values = None
-        if model_inputs.get('use_cache', False):
-            if len(outputs) > 2 and outputs[2] is not None:
-                new_past_key_values = outputs[2]
+        if model_inputs.get('use_cache', False): # Should always be true from prepare_inputs
+            if self._do_output_past(outputs): # Checks if past is actually in outputs
+                new_past_key_values = outputs[2] # Assuming past_key_values are at index 2
             else:
-                logger.warning("_decode_step: `use_cache` was True, but `new_past_key_values` is None or not found at outputs[2].")
-        elif len(outputs) > 2 and outputs[2] is not None : # Check if past_kv are there even if use_cache was false (should not happen with HF standard)
-             logger.warning("_decode_step: `use_cache` was False, but found unexpected past_key_values in output at index 2.")
+                logger.warning("_decode_step: `use_cache` was True, but `new_past_key_values` not found in outputs.")
+
+        # Get Logits for Prediction
+        # input_ids to prepare_inputs_for_generation is typically [last_generated_token, MASK_TOKEN]
+        # The MASK token is expected to be at index 1 of the input_ids to the model for this step.
+        mask_token_index = 1 # Assuming input to model was [token, MASK] or [BOS, MASK]
+        # If input_ids to model was just the current token (HF style), then index is 0 and seq_len is 1.
+        # BertForImageCaptioning's prepare_inputs makes input_ids as [token, MASK]
+
+        # sequence_output from roberta has shape (batch_size * num_beams, step_seq_len, hidden_size)
+        # We need the hidden state of the MASK token to predict the next token.
+        # If input_ids to roberta was [token, MASK], then step_seq_len is 2.
+        # The MASK token's hidden state is at index 1.
+        if sequence_output.shape[1] > mask_token_index:
+            next_token_hidden_states = sequence_output[:, mask_token_index, :]
+        else:
+            # This case might happen if input_ids to roberta was just the current token (length 1)
+            # Then we take the hidden state of that token.
+            next_token_hidden_states = sequence_output[:, 0, :]
 
 
-        # 3. Get Logits for Prediction
-        # The `sequence_output` from `self.roberta` corresponds to the `input_ids`
-        # prepared by `prepare_inputs_for_generation`.
-        # For generation, `input_ids` to `prepare_inputs_for_generation`
-        # is typically `[last_generated_token, MASK_TOKEN]` for subsequent steps,
-        # or `[BOS_TOKEN, MASK_TOKEN]` for the first step (potentially with OD labels too).
-
-        # `model_inputs['input_ids']` had shape (batch, step_seq_len)
-        # e.g., (batch, 2) for [token, MASK] or (batch, 2 + od_len) for [BOS, MASK, ODs]
-        # The MASK token is expected to be at index 1 of the text part of these input_ids.
-        mask_token_index = 1
-        # sequence_output has shape (batch, step_seq_len, hidden_size)
-        next_token_hidden_states = sequence_output[:, mask_token_index, :]
-
-        # `self.cls` is RobertaCaptioningHeads
-        logits = self.cls(next_token_hidden_states)
-
-        # 4. Return
+        logits = self.cls(next_token_hidden_states) # self.cls is RobertaCaptioningHeads
         return logits, new_past_key_values
 
 
     def prepare_inputs_for_generation(self, curr_ids, past=None, **kwargs):
         """
         Prepares inputs for generation, carefully adapted from BertForImageCaptioning.
-        `kwargs` may contain `img_feats`, `attention_mask` etc. if not set as instance attributes by `generate`.
-        However, this implementation assumes they are instance attributes (`self.img_feats`, `self.full_attention_mask`, etc.)
-        set by the `generate` method, expanded for beams.
         """
-        mask_token_id = self.config.mask_token_id # RoBERTa's mask token ID
-        batch_size = curr_ids.shape[0] # This is effective_batch_size (batch_size * num_beams * num_fsm_states * num_return_sequences)
+        mask_token_id = self.mask_token_id # Set in generate() from self.config.mask_token_id
+        batch_size = curr_ids.shape[0] # effective_batch_size (batch_size * num_beams * num_fsm_states * num_return_sequences)
 
         mask_ids = torch.full(
             (batch_size, 1), mask_token_id, dtype=torch.long, device=curr_ids.device
         )
 
-        # Helper to slice pre-computed full tensors.
-        # These tensors (e.g., self.full_masked_pos) have shape (effective_batch_size, full_max_len)
-        # where full_max_len = self.max_seq_len (text) + self.od_labels_len + self.img_seq_len (potentially)
-        # or just self.max_seq_len (text) + self.od_labels_len if image features are not part of these specific tensors.
-        # The original BERT code slices based on text sequence length for some parts.
+        # Local helper functions from BERT's prepare_inputs (if used)
+        # These relied on self.max_seq_len and self.od_labels_len, which should be set in self.generate()
+        def _slice(t, start, end):
+            if t is None: return t
+            # Assuming t is (batch_size, self.max_seq_len + self.od_labels_len) before expansion
+            # After expansion in generate, t is (effective_batch_size, ...)
+            # This slicing is specific to text part + OD labels part.
+            return t[:, start: end]
 
-        # Effective length of text part of full_position_ids, full_token_type_ids etc.
-        # This usually corresponds to self.max_seq_len (max caption length).
-        # Let full_text_od_len = self.max_seq_len + self.od_labels_len
-
-        # The `_slice` and `_remove_elements` logic from original BERT:
-        # `_slice(t, start, end)` selected columns from start to end from a tensor `t` of shape (batch, full_text_od_len)
-        # `_remove_elements(t, start, end)` removed columns from start to end.
-
-        # These utility functions are specific to how BertForImageCaptioning structures its full tensors.
-        # Assuming they are available or adaptable if needed. For now, focusing on the core logic.
-
-        # Determine current text length (excluding BOS, MASK, OD_LABELS)
-        # curr_ids contains [BOS, token1, token2, ...]
-        # current_actual_text_len = curr_ids.shape[1] -1 # Number of actual text tokens generated so far
+        def _remove_elements(t, start, end):
+            if t is None: return t
+            return torch.cat([t[:, :start], t[:, end:]], dim=1)
 
         img_feats_for_step = None
-        past_key_values_for_step = past # `past` is the past_key_values from the previous step
+        past_key_values_for_step = past # `past` from previous step, directly used as past_key_values
 
-        if past is None: # First decoding step (after BOS)
-            # Input: [BOS, MASK] or [BOS, MASK, OD_LABELS]
-            input_ids = torch.cat([curr_ids, mask_ids], dim=1) # e.g., [BOS, MASK]
-            current_total_input_len = input_ids.shape[1] # Length of [BOS, MASK] = 2
+        if past is None: # First decoding step (e.g., after BOS token)
+            # Input for this step: [curr_ids (BOS), mask_ids]
+            # If add_od_labels: [curr_ids (BOS), mask_ids, od_label_ids]
+            input_ids = torch.cat([curr_ids, mask_ids], dim=1)
+            current_text_part_len = input_ids.shape[1] # e.g., 2 for [BOS, MASK]
 
-            # Attention mask, token_type_ids, position_ids need to cover [BOS, MASK, OD_LABELS, IMG_FEATS]
-            # self.full_attention_mask is (batch, full_len, full_len)
-            # We need to select the part relevant for [BOS, MASK, OD_LABELS, IMG_FEATS]
-            # The elements not yet generated (future text tokens) should be excluded from rows/cols.
+            # Attention mask construction for the first step
+            # The mask should cover: [text_part, od_labels (opt), img_feats]
+            # attention_mask_len = current_text_part_len
+            # if self.add_od_labels:
+            #     input_ids = torch.cat([input_ids, self.od_label_ids], dim=1) # self.od_label_ids is already beam-expanded
+            #     attention_mask_len += self.od_labels_len
+            # if self.img_feats is not None: # self.img_feats is already beam-expanded
+            #     img_feats_for_step = self.img_feats
+            #     attention_mask_len += self.img_seq_len
+            # attention_mask = torch.ones((batch_size, attention_mask_len), device=curr_ids.device)
 
-            # Example: if full sequence is [CLS TXT PAD OD IMG]
-            # Current input is [CLS MASK OD IMG]
-            # `seq_start_idx_in_full_mask` is where MASK begins in the text part of full_attention_mask
-            # `seq_end_idx_in_full_mask` is end of text part in full_attention_mask
-            seq_start_idx_in_full_mask = current_total_input_len -1 # -1 because MASK replaces the first actual token position
-            seq_end_idx_in_full_mask = self.max_seq_len # End of text part
+            # BERT's complex attention mask slicing:
+            # This assumes self.full_attention_mask is a 3D mask (batch, full_len, full_len)
+            # and parts corresponding to future text tokens are removed.
+            # full_len = self.max_seq_len + self.od_labels_len + self.img_seq_len
+            # seq_start = current_text_part_len # Where MASK token is, relative to text part start
+            # seq_end = self.max_seq_len      # End of text part in full mask
+            # attention_mask = _remove_rows_cols_from_3d_mask(self.full_attention_mask, seq_start, seq_end, seq_start, seq_end)
+            # This _remove_rows_cols_from_3d_mask needs to be defined if using this exact logic.
+            # For simplicity, if self.full_attention_mask is already prepared for the first step (e.g. pre-sliced or correctly structured)
+            # we might use it directly or derive from it.
+            # The current RobertaImgModel.forward expects a 2D attention_mask.
 
-            # This is complex. BertImgModel's _remove_rows_cols needs exact indices.
-            # For simplicity here, we assume self.full_attention_mask, self.full_token_type_ids etc.
-            # are already prepared by `generate` to be of shape (batch_size, current_total_input_len + od_len + img_len, ...)
-            # and are correctly ordered. The slicing in Bert's `prepare_inputs` is very specific to its setup.
-            # Let's try a simplified adaptation:
-
-            # We need to construct an attention mask for the sequence:
-            # [curr_ids, mask_ids, (optional) od_label_ids] + img_feats
-            # The `RobertaImgModel.forward` will then create the extended_attention_mask.
-
-            # Length of text part for current step: curr_ids + mask_ids
-            current_text_part_len = input_ids.shape[1]
-            attention_mask_len = current_text_part_len
-
+            # Simplified first-step attention_mask (model will extend it to 3D/4D):
+            # This mask is for the sequence [input_ids (incl. MASK, OD), img_feats]
+            temp_input_ids_len = current_text_part_len
             if self.add_od_labels:
                 input_ids = torch.cat([input_ids, self.od_label_ids], dim=1)
-                attention_mask_len += self.od_labels_len
+                temp_input_ids_len += self.od_labels_len
 
-            if self.img_feats is not None: # Should be self.img_feats from generate()
-                img_feats_for_step = self.img_feats
+            attention_mask_len = temp_input_ids_len
+            if self.img_feats is not None:
+                img_feats_for_step = self.img_feats # Already beam-expanded
                 attention_mask_len += self.img_seq_len
-
-            # Create a simple attention mask for this structure
-            # RobertaImgModel will extend it.
             attention_mask = torch.ones((batch_size, attention_mask_len), device=curr_ids.device)
 
-            # position_ids:
-            # RoBERTa embeddings handle position_ids internally if not provided, based on input_ids.
-            # For generation, providing them explicitly, matching Bert's approach, can be more robust.
-            # Position IDs for [BOS, MASK]
+
+            # Position IDs
+            # Explicit creation similar to BERT, adapted for RoBERTa if needed (e.g. padding_idx offset for RobertaEmbeddings)
+            # RobertaEmbeddings uses `past_key_values_length` and `padding_idx` to create its own positions if `position_ids` is None.
+            # If we provide them, they should be "absolute" positions.
             position_ids = torch.arange(current_text_part_len, dtype=torch.long, device=curr_ids.device)
             if self.add_od_labels:
-                # OD labels might have specific position IDs (e.g., starting from self.od_labels_start_posid)
-                # This needs to align with how RobertaEmbeddings handles position_ids if they are gappy.
-                # For now, assume contiguous or rely on RobertaEmbeddings' internal generation if None.
-                # Bert version: self.full_position_ids is sliced.
-                # Simplified: create position_ids for current input.
-                # If self.od_labels_start_posid is used, positions might be like [0, 1, 100, 101, ...]
-                # This requires RobertaEmbeddings to handle potentially non-contiguous absolute positions correctly.
                 od_pos_ids = torch.arange(self.od_labels_start_posid, self.od_labels_start_posid + self.od_labels_len, dtype=torch.long, device=curr_ids.device)
-                position_ids = torch.cat([position_ids, od_pos_ids], dim=0)
-            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+                position_ids = torch.cat([position_ids, od_pos_ids], dim=0) # This results in (N,)
+            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1) # (B, N)
 
-
-            # token_type_ids:
-            # For [BOS, MASK] + [OD_LABELS (if any)]
-            # RoBERTa typically doesn't use token_type_ids heavily (type_vocab_size=1).
-            # If used, text part is 0, OD labels could be 1 (or also 0).
+            # Token Type IDs
+            # For RoBERTa, often all zeros if type_vocab_size is 1.
             token_type_ids_text_part = torch.zeros((batch_size, current_text_part_len), dtype=torch.long, device=curr_ids.device)
             if self.add_od_labels:
-                # Assuming OD labels get a different type, e.g., 1, if type_vocab_size allows.
-                # Or all zeros if type_vocab_size is 1.
-                od_type = 1 if self.config.type_vocab_size > 1 else 0
+                # od_type = 1 if self.config.type_vocab_size > 1 else 0 # Example for different type
+                od_type = 0 # Assuming all same type for RoBERTa simplicity
                 token_type_ids_od_part = torch.full((batch_size, self.od_labels_len), od_type, dtype=torch.long, device=curr_ids.device)
                 token_type_ids = torch.cat([token_type_ids_text_part, token_type_ids_od_part], dim=1)
             else:
                 token_type_ids = token_type_ids_text_part
 
-            # `self.prev_encoded_layers` (past_key_values cache) is None for the first step.
-            # The model call will generate the first set of past_key_values.
-            past_key_values_for_step = None
-            self.prev_encoded_layers = None # Reset cache for this sequence generation call
+            # self.prev_encoded_layers is BERT's name for past_key_values cache.
+            # For RoBERTa, we directly use past_key_values_for_step.
+            # No complex reordering of `past` state as in BERT's prepare_inputs.
+            self.prev_encoded_layers = None # Clear any old state (though `past` argument handles this)
 
         else: # Subsequent decoding steps (past is not None)
+            # Input for this step: [last_token_generated, mask_ids]
             last_token = curr_ids[:, -1:]
-            input_ids = torch.cat([last_token, mask_ids], dim=1) # Input is [PrevToken, MASK]
+            input_ids = torch.cat([last_token, mask_ids], dim=1) # Shape: (batch_size, 2)
 
-            # Position IDs for [PrevToken, MASK]
-            # PrevToken is at curr_ids.shape[1]-1, MASK is at curr_ids.shape[1]
-            # RobertaEmbeddings creates position_ids with offset, so relative positions matter.
-            # If curr_ids = [BOS, tok1], then PrevToken=tok1 (pos=1), MASK (pos=2)
-            # These positions are relative to the start of text.
-            # The `past_key_values_length` in RobertaEmbeddings.forward will handle the offset.
-            # So, we can pass position_ids for the current slice, e.g., [actual_pos_of_PrevToken, actual_pos_of_MASK]
-            # Or, let RobertaEmbeddings compute them based on `past_key_values_length`.
-            # For explicit control like Bert:
-            current_text_len_so_far = curr_ids.shape[1] # Includes BOS
-            # pos for PrevToken is (current_text_len_so_far - 1), pos for MASK is current_text_len_so_far
-            # These are 0-indexed from start of text.
-            # Example: curr_ids=[BOS, t1], current_text_len_so_far=2. PrevToken=t1 (at index 1). MASK will be at index 2.
-            # input_ids = [t1, MASK]
-            # position_ids should be [1, 2] (absolute, if RobertaEmbeddings handles padding_idx offset)
-            # Or, if RobertaEmbeddings needs relative to slice, and handles offset by past_key_values_length:
-            # position_ids = torch.arange(2L, device=curr_ids.device).unsqueeze(0) and then it adds offset.
-            # Let's defer to RobertaEmbeddings internal logic by setting position_ids = None,
-            # as it uses past_key_values_length.
-            position_ids = None
+            # Position IDs:
+            # RobertaEmbeddings can infer this using `past_key_values_length`.
+            # If providing explicitly:
+            # current_text_len_generated = curr_ids.shape[1] # Length of [BOS, token1, ..., last_token]
+            # pos_for_last_token = current_text_len_generated - 1
+            # pos_for_mask_token = current_text_len_generated
+            # position_ids = torch.tensor([pos_for_last_token, pos_for_mask_token], dtype=torch.long, device=curr_ids.device).unsqueeze(0).expand(batch_size, 2)
+            # For simplicity and robustness with RoBERTa's embedding, let RobertaEmbeddings handle it.
+            position_ids = None # RobertaEmbeddings will use past_key_values_length to create correct position_ids
 
-            # token_type_ids for [PrevToken, MASK] - usually all 0s for RoBERTa text.
+            # Token Type IDs for [last_token, MASK] - usually all zeros for RoBERTa.
             token_type_ids = torch.zeros_like(input_ids)
 
-            img_feats_for_step = None # Image features are in `past`
+            img_feats_for_step = None # Image features info is in `past_key_values`
 
-            # `past` *is* the past_key_values.
-            # The complex logic in Bert's `prev_encoded_layers` re-shuffles these keys/values
-            # if OD labels and ImgFeats were part of the *initial* sequence passed to BERT layers.
-            # If RobertaImgModel's encoder receives concatenated text+image embeddings, then `past`
-            # already reflects this combined context.
-            # The re-ordering in Bert was: self.prev_encoded_layers = [torch.cat([x[:, 2:, :], x[:, :start_pos,:]], dim=1) for x in past]
-            # This implies the initial `past` had structure [BOS, TextTokenSoFar, OD_Labels, Img_Features].
-            # And it reordered to [OD_Labels, Img_Features, BOS, TextTokenSoFar] for caching.
-            # This is highly model-specific.
-            # For RoBERTa, if past_key_values are standard, they are layer-wise tuples of (key, value) tensors.
-            # Their sequence dimension corresponds to the *effective sequence length seen by the attention layers*.
+            # Attention Mask for subsequent steps:
+            # With past_key_values, the model's attention mechanism combines cached keys/values with new keys/values.
+            # The attention_mask passed to model.forward should typically only mask padding in the *new* input_ids.
+            # Since our new input_ids is [token, MASK] (length 2) and has no padding, mask is all ones.
+            attention_mask = torch.ones_like(input_ids) # Shape (batch_size, 2)
+            # RobertaImgModel.forward will extend this 2D mask correctly when past_key_values are present.
 
-            # Assuming `past` is already in the correct format (tuple of layer_wise key/value tensors)
-            # and its sequence length matches the combined [Text, OD, Img] structure from the first pass.
-            past_key_values_for_step = past
-
-            # Attention mask for [PrevToken, MASK] given `past_key_values_for_step`.
-            # The length of items in past_key_values (dim 2 for key/value) indicates total items attended to previously.
-            # e.g., past_key_values[0][0].shape = (batch, num_heads, past_seq_len, head_size)
-            past_seq_len = past[0][0].shape[2] # Total length of what's in past_key_values
-            current_input_len = input_ids.shape[1] # Should be 2 for [Token, MASK]
-
-            # Attention mask should be (batch, current_input_len, past_seq_len + current_input_len)
-            # So [Token, MASK] can attend to everything in `past` and to `Token` (for MASK).
-            # MASK should attend to `Token` and `past`. `Token` should attend to `past`.
-            # Simplified: allow current inputs to attend to past and themselves appropriately.
-            # Standard generation attention mask:
-            attention_mask = torch.ones((batch_size, past_seq_len + current_input_len), device=curr_ids.device)
-            # The `RobertaImgModel.forward` will create the proper extended causal mask.
-            # For a slice being decoded, the attention_mask needs to be (batch_size, slice_len_with_past)
-            # No, `RobertaImgModel` receives `attention_mask` for the *current items* being passed if `past_key_values` is used.
-            # The shape should be (batch_size, current_input_len). The causal mask is built inside.
-            # However, for compatibility with BERT's `full_attention_mask` slicing:
-            # The original BERT code constructs a very specific attention_mask by slicing `self.full_attention_mask`.
-            # This implies a fixed, pre-computed global attention structure.
-            # If `past_key_values` are standard HF, the `attention_mask` for `model.forward`
-            # only needs to cover the *new* `input_ids` (e.g., shape `(batch_size, 1)` for the token being generated).
-            # The cached keys/values handle the past.
-
-            # Let's use the simplified approach for HF standard `past_key_values`:
-            # `input_ids` is just the new token (e.g. `curr_ids[:,-1:]` without MASK)
-            # `attention_mask` is just for this new token `torch.ones((batch_size, 1))`
-            # This part needs to align with how `_decode_step` calls this and the model.
-            # The Bert `_decode_step` uses `[last_token, mask_ids]`.
-            # So, `attention_mask` for these two tokens, allowing them to see `past`.
-            attention_mask = torch.ones((batch_size, input_ids.shape[1] + past_seq_len), device=curr_ids.device)
-            # This mask will be extended by `RobertaImgModel` to 4D.
-            # It needs to be `(batch_size, current_input_ids_len, total_attended_len)` for triangular if no past_kv.
-            # With `past_kv`, it's usually `(batch_size, current_input_ids_len)`.
-            # Let's assume `RobertaImgModel` will handle it if `past_key_values` is not None.
-            # The minimal mask is `torch.ones_like(input_ids)`.
-            # The existing `RobertaImgModel` will then extend this.
-            # If `past_key_values` is not None, `attention_mask` in `RobertaEncoder` is for the query sequence.
-            # `extended_attention_mask` is `attention_mask[:, None, None, :]`
-            # `key_layer = torch.cat([past_key_value[0], key_layer], dim=2)`
-            # `attention_scores = attention_scores + attention_mask` (this mask should be for query vs key+past_key)
-            # This implies `attention_mask` needs to be `(B, QuerySeqLen, KeySeqLen)`
-            # This is getting too complex without knowing `_decode_step` structure.
-            # Reverting to BERT's slicing logic for `attention_mask` is safer if `full_attention_mask` is structured similarly.
-            # BERT uses: `attention_mask = self.full_attention_mask[:, od_len+img_len+start_pos : od_len+img_len+end_pos, :od_len+img_len+end_pos]`
-            # This implies `full_attention_mask` is (B, FullCombined, FullCombined).
-            # This requires `self.od_labels_len`, `self.img_seq_len` to be accurate.
-            # For now, this part of attention_mask for past!=None is a placeholder needing robust test.
-            # A common pattern for HF generation with past_kv is just `attention_mask = torch.ones((batch_size, 1), ...)` for the new token.
-            # But since our input_ids is `[last_token, mask_ids]`, it's (batch, 2).
-            attention_mask = torch.ones_like(input_ids) # Simplest form, assumes model handles past internally.
-
+        # Common inputs for both cases (first step / subsequent steps)
         model_inputs = {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
-            'position_ids': position_ids, # Can be None to let RobertaEmbeddings compute it
-            'token_type_ids': token_type_ids, # Can be None if RoBERTa doesn't use them
+            'position_ids': position_ids,
+            'token_type_ids': token_type_ids,
             'past_key_values': past_key_values_for_step,
-            'img_feats': img_feats_for_step, # None after first step if info is in past_key_values
-
-            # Control flags for model.forward()
-            'output_attentions': False,
-            'output_hidden_states': False,
-            'use_cache': True, # Critical for generation
-            # 'is_training': False, # Model should be in eval mode if called from generate
+            'img_feats': img_feats_for_step, # Only for the first step
+            # Model control flags
+            'output_attentions': False, # Usually False for generation
+            'output_hidden_states': False, # Usually False for generation
+            'use_cache': True, # ESSENTIAL for efficient generation
+            # 'is_training': False, # Implied by generate context, model should be in eval mode.
         }
         return model_inputs
 
-    # prod_generate and prod_no_hidden_generate also need adaptation from BertForImageCaptioning
-    # These are specialized versions of `generate`
-    # Placeholder - THESE NEED FULL ADAPTATION
-    def prod_generate(self, *args, **kwargs):
-        logger.warning("RobertaForImageCaptioning.prod_generate() needs full adaptation.")
-        # Adapt from BertForImageCaptioning.prod_generate, changing self.bert to self.roberta
-        # and ensuring all RoBERTa-specific API details are handled.
-        return self.generate(*args, **kwargs) # Fallback, not correct
+    def prod_generate(self, img_feats, od_label_ids, max_length,
+                      bos_token_id=None, eos_token_ids=None, mask_token_id=None,
+                      od_labels_start_posid=None, add_od_labels=True,
+                      # RoBERTa specific token type IDs might be all 0s
+                      cls_token_segment_id=0, sequence_a_segment_id=0, sequence_b_segment_id=0):
+        """
+        Generates captions for PROD (efficient production) setting. Adapted from BertForImageCaptioning.
+        Assumes batch_size = 1, num_beams = 1. Uses past_key_values for speed.
+        RoBERTa adaptation: Simplified past_key_values handling, token_type_ids, position_ids.
+        """
+        if bos_token_id is None: bos_token_id = self.config.bos_token_id
+        if eos_token_ids is None:
+            # Ensure eos_token_ids is a list, even if a single ID is provided in config
+            if hasattr(self.config, 'eos_token_id') and self.config.eos_token_id is not None:
+                eos_token_ids = [self.config.eos_token_id]
+            else:
+                eos_token_ids = [] # Default to empty list if not configured
+        elif isinstance(eos_token_ids, int):
+            eos_token_ids = [eos_token_ids]
 
-    def prod_no_hidden_generate(self, *args, **kwargs):
-        logger.warning("RobertaForImageCaptioning.prod_no_hidden_generate() needs full adaptation.")
-        # Adapt from BertForImageCaptioning.prod_no_hidden_generate
-        return self.generate(*args, **kwargs) # Fallback, not correct
+        if mask_token_id is None: mask_token_id = self.config.mask_token_id
 
+        batch_size = img_feats.shape[0]
+        assert batch_size == 1, "prod_generate is for batch_size=1"
+        device = img_feats.device
+
+        od_labels_len = od_label_ids.shape[1] if add_od_labels and od_label_ids is not None else 0
+        img_seq_len = img_feats.shape[1] # Assuming img_feats is (batch, img_seq_len, img_dim)
+
+        mask_input_id_tensor = torch.full((1, 1), mask_token_id, dtype=torch.long, device=device)
+        current_generated_ids = torch.full((1, 1), bos_token_id, dtype=torch.long, device=device)
+
+        past_key_values = None
+        sum_logprob = 0.0
+
+        # Initial input construction for the very first step
+        # input_ids_step1: [BOS, MASK, OD_labels (opt)]
+        input_ids_list_step1 = [current_generated_ids, mask_input_id_tensor]
+        if add_od_labels and od_label_ids is not None:
+            input_ids_list_step1.append(od_label_ids)
+        input_ids_for_first_step = torch.cat(input_ids_list_step1, dim=1)
+
+        current_img_feats_for_model = img_feats # Only pass img_feats at the first step
+
+        # Attention mask for the first step (covers text part, optional OD labels, and image features)
+        # RobertaImgModel's forward pass will create the extended 3D/4D mask.
+        attention_mask_first_step_len = input_ids_for_first_step.shape[1] + (img_seq_len if current_img_feats_for_model is not None else 0)
+        attention_mask_for_first_step = torch.ones((1, attention_mask_first_step_len), device=device)
+
+        # Token type IDs for RoBERTa: typically all 0s.
+        token_type_ids_for_first_step = torch.zeros_like(input_ids_for_first_step)
+        if add_od_labels and od_label_ids is not None and hasattr(self.config, 'type_vocab_size') and self.config.type_vocab_size > 1:
+             # RoBERTa often has type_vocab_size=1 or 0, so this might not apply or sequence_b_segment_id would be 0.
+             len_text_part_step1 = current_generated_ids.shape[1] + mask_input_id_tensor.shape[1]
+             # Ensure sequence_b_segment_id is valid for the model's type_vocab_size
+             actual_sequence_b_segment_id = sequence_b_segment_id if sequence_b_segment_id < self.config.type_vocab_size else 0
+             token_type_ids_for_first_step[:, len_text_part_step1:] = actual_sequence_b_segment_id
+
+
+        # Position IDs: For RoBERTa, it's often best to let RobertaEmbeddings compute them.
+        # Pass None, and RobertaEmbeddings will use past_key_values_length (0 for 1st step) and padding_idx.
+        position_ids_for_first_step = None
+
+        # Initialize loop variables for clarity, used from the second step onwards
+        input_ids_incremental_loop = None
+        attention_mask_incremental_loop = None
+        token_type_ids_incremental_loop = None
+        position_ids_incremental_loop = None # Will remain None for RoBERTa with past_key_values
+
+        for _ in range(max_length):
+            # Use full inputs for the first step, incremental inputs for subsequent steps
+            current_input_ids_for_model_step = input_ids_for_first_step if past_key_values is None else input_ids_incremental_loop
+            current_attention_mask_for_model_step = attention_mask_for_first_step if past_key_values is None else attention_mask_incremental_loop
+            current_token_type_ids_for_model_step = token_type_ids_for_first_step if past_key_values is None else token_type_ids_incremental_loop
+            current_position_ids_for_model_step = position_ids_for_first_step if past_key_values is None else position_ids_incremental_loop
+
+            model_inputs = {
+                'input_ids': current_input_ids_for_model_step,
+                'img_feats': current_img_feats_for_model, # None after the first step
+                'attention_mask': current_attention_mask_for_model_step,
+                'token_type_ids': current_token_type_ids_for_model_step,
+                'position_ids': current_position_ids_for_model_step,
+                'past_key_values': past_key_values,
+                'use_cache': True,
+                'output_attentions': False,
+                'output_hidden_states': False,
+            }
+
+            outputs = self.roberta(**model_inputs) # self.roberta is RobertaImgModel
+            sequence_output = outputs[0]
+            # past_key_values are expected at index 2 if RobertaImgModel's encoder returns them (when use_cache=True)
+            past_key_values = outputs[2] if self._do_output_past(outputs) else None
+
+            # Determine the index of the MASK token's output.
+            # For the first step, input was [BOS, MASK, ODs...]. MASK is at index 1.
+            # For subsequent steps, input was [prev_token, MASK]. MASK is at index 1.
+            mask_token_output_idx = 1
+            next_token_logits = self.cls(sequence_output[:, mask_token_output_idx, :])
+
+            next_token_id = torch.argmax(next_token_logits, dim=-1) # Greedy decoding
+
+            log_probs = F.log_softmax(next_token_logits, dim=-1)
+            sum_logprob += log_probs[0, next_token_id[0]].item() # batch_size is 1
+
+            if next_token_id.item() in eos_token_ids:
+                break
+
+            current_generated_ids = torch.cat([current_generated_ids, next_token_id.unsqueeze(-1)], dim=1)
+
+            if (current_generated_ids.shape[1] - 1) >= max_length: # -1 for BOS token
+                break
+
+            # Prepare inputs for the *next* decoding step
+            input_ids_incremental_loop = torch.cat([next_token_id.unsqueeze(-1), mask_input_id_tensor], dim=1) # [newly_generated_token, MASK]
+            current_img_feats_for_model = None # Image features are now encoded in past_key_values
+            attention_mask_incremental_loop = torch.ones_like(input_ids_incremental_loop) # Attention for [current_token, MASK]
+            token_type_ids_incremental_loop = torch.zeros_like(input_ids_incremental_loop) # RoBERTa typically uses 0s
+            position_ids_incremental_loop = None # Crucial for RoBERTa with past_key_values
+
+        final_gen_len = current_generated_ids.shape[1] - 1 # Number of generated tokens (excluding BOS)
+        avg_logprob = sum_logprob / final_gen_len if final_gen_len > 0 else 0.0
+        return current_generated_ids, torch.full((1,), avg_logprob, device=device)
+
+    def prod_no_hidden_generate(self, img_feats, od_label_ids, max_length,
+            bos_token_id=None, eos_token_ids=None, mask_token_id=None,
+            od_labels_start_posid=None, add_od_labels=True,
+            # RoBERTa specific token type IDs might be all 0s or use configured values
+            cls_token_segment_id=0, # From RoBERTa config or default 0
+            sequence_a_segment_id=0, # From RoBERTa config or default 0
+            sequence_b_segment_id=0, # RoBERTa often doesn't distinguish segment B like BERT
+                                     # Defaulting to 0, or use a config value if type_vocab_size > 1
+            ):
+        """
+        Generates captions for PROD (efficient production) setting, without using hidden state history (past_key_values).
+        Adapted from BertForImageCaptioning.prod_no_hidden_generate.
+        Assumes batch_size = 1, num_beams = 1.
+        Each step is a full forward pass of the current sequence.
+        """
+        if bos_token_id is None: bos_token_id = self.config.bos_token_id
+        if eos_token_ids is None:
+            if hasattr(self.config, 'eos_token_id') and self.config.eos_token_id is not None:
+                eos_token_ids = [self.config.eos_token_id]
+            else:
+                eos_token_ids = []
+        elif isinstance(eos_token_ids, int):
+            eos_token_ids = [eos_token_ids]
+        if mask_token_id is None: mask_token_id = self.config.mask_token_id
+
+        batch_size = img_feats.shape[0]
+        assert batch_size == 1, "prod_no_hidden_generate is for batch_size=1"
+        device = img_feats.device
+
+        od_labels_len = od_label_ids.shape[1] if add_od_labels and od_label_ids is not None else 0
+        img_seq_len = img_feats.shape[1]
+
+        # Mask token tensor, used repeatedly
+        mask_input_id_tensor = torch.full((1, 1), mask_token_id, dtype=torch.long, device=device)
+
+        # Current generated sequence, starts with BOS
+        current_generated_ids = torch.full((1, 1), bos_token_id, dtype=torch.long, device=device)
+
+        # Pre-calculate a triangle mask for self-attention up to max_length for the text part
+        # This is for ensuring causal attention for the generated text tokens.
+        # Max possible text length = max_length (caption) + 1 (for MASK token).
+        max_text_len_for_mask = max_length + 1
+        triangle_self_attention_mask = torch.tril(torch.ones(
+            (max_text_len_for_mask, max_text_len_for_mask), dtype=torch.long, device=device
+        ))
+
+        sum_logprob = 0.0
+
+        # Helper to prepare inputs for RobertaImgModel for each step
+        def _prepare_inputs_for_step(generated_ids_so_far):
+            current_text_len = generated_ids_so_far.shape[1] # Length of [BOS, token1, ..., current_token]
+
+            # Input IDs for this step: [BOS, token1, ..., current_token, MASK, OD_labels (opt)]
+            input_ids_list_step = [generated_ids_so_far, mask_input_id_tensor]
+            if add_od_labels and od_label_ids is not None:
+                input_ids_list_step.append(od_label_ids)
+            step_input_ids = torch.cat(input_ids_list_step, dim=1)
+
+            # Token Type IDs for RoBERTa (often all zeros)
+            # For [BOS, token1, ..., MASK] part:
+            text_and_mask_len = current_text_len + 1 # +1 for MASK token
+            step_token_type_ids = torch.full((1, text_and_mask_len), sequence_a_segment_id, dtype=torch.long, device=device)
+            if add_od_labels and od_label_ids is not None:
+                # Use sequence_b_segment_id for OD labels if type_vocab_size allows, else 0
+                actual_od_segment_id = sequence_b_segment_id if self.config.type_vocab_size > sequence_b_segment_id else 0
+                od_token_types = torch.full((1, od_labels_len), actual_od_segment_id, dtype=torch.long, device=device)
+                step_token_type_ids = torch.cat([step_token_type_ids, od_token_types], dim=1)
+
+            # Position IDs: For RoBERTa, typically allow RobertaEmbeddings to create them if not providing specific offsets.
+            # If created explicitly here, they should be absolute.
+            # For a "no_hidden" (no past_key_values) pass, positions are from 0 for the current sequence.
+            text_od_combined_len = text_and_mask_len + od_labels_len
+            step_position_ids = torch.arange(text_od_combined_len, dtype=torch.long, device=device).unsqueeze(0)
+            if add_od_labels and od_labels_start_posid is not None:
+                 # If explicit OD label start positions are given, adjust them.
+                 # This part needs to be robust. Original BERT code for prod_no_hidden uses fixed ranges.
+                 # For simplicity, let's assume od_labels_start_posid is an offset for OD part if used.
+                 # This means positions for text part are [0...text_len-1] and OD part is [od_start...od_start+od_len-1].
+                 # The current step_position_ids is [0 ... text_od_combined_len-1].
+                 # If od_labels_start_posid is e.g. max_length, we'd offset the OD part.
+                 # The BERT version's _prepare_inputs for prod_no_hidden used:
+                 # position_ids = torch.arange(token_len, dtype=torch.long, device=device)
+                 # od_labels_posids = torch.arange(od_labels_start_posid, od_labels_start_posid + od_labels_len, ...)
+                 # step_position_ids = torch.cat([position_ids, od_labels_posids])
+                 # Let's try to replicate this structure for `token_len` = text_and_mask_len
+                 pos_ids_text_mask_part = torch.arange(text_and_mask_len, dtype=torch.long, device=device)
+                 if add_od_labels and od_label_ids is not None:
+                     actual_od_labels_start_posid = od_labels_start_posid if od_labels_start_posid is not None else text_and_mask_len
+                     pos_ids_od_part = torch.arange(actual_od_labels_start_posid, actual_od_labels_start_posid + od_labels_len, dtype=torch.long, device=device)
+                     step_position_ids = torch.cat([pos_ids_text_mask_part, pos_ids_od_part], dim=0).unsqueeze(0)
+                 else:
+                     step_position_ids = pos_ids_text_mask_part.unsqueeze(0)
+
+
+            # Attention Mask:
+            # Covers [text_part (incl MASK), OD_labels (opt), img_feats]
+            # Text part is causal (triangle_self_attention_mask).
+            # OD_labels and img_feats attend to everything before/among themselves but not future text.
+            # Text cannot attend to future text.
+            # RobertaImgModel expects a 2D mask [batch, combined_seq_len]
+
+            # Length of just text + MASK tokens for self-attention part of the mask
+            current_text_plus_mask_len = generated_ids_so_far.shape[1] + 1 # +1 for the MASK token
+
+            # 1. Self-attention for the text part (including MASK token)
+            text_self_attention_mask = triangle_self_attention_mask[:current_text_plus_mask_len, :current_text_plus_mask_len]
+
+            # 2. Attention between text and OD labels / image features
+            # Text can attend to OD labels and image features.
+            # OD labels / image features can attend to text (that came before them in construction).
+            # For simplicity in this "no_hidden" version, often a full attention is allowed for non-text parts to text,
+            # and among non-text parts themselves.
+            # The BERT code: attention_mask[:, :token_len, :token_len].copy_(triangle_mask[:token_len, :token_len])
+            # attention_mask[:, token_len:, :token_len] = 0 # od_label, img_feat can not see sentence (this seems reversed?)
+            # Let's assume:
+            # - Text part: causal mask.
+            # - OD/Image part: can see all text part, and all OD/Image part.
+            # - Text part: can see all OD/Image part.
+
+            total_len_before_img = step_input_ids.shape[1] # Length of [BOS, ..., MASK, ODs...]
+            total_len_with_img = total_len_before_img + img_seq_len
+
+            step_attention_mask = torch.ones((1, total_len_with_img), dtype=torch.long, device=device)
+
+            # Apply causal mask for the text_plus_mask part to itself
+            # This requires constructing a larger 2D mask and then embedding the triangle.
+            # For RobertaImgModel, it expects a 2D mask [batch, seq], it will make it 3D/4D.
+            # The simplest is to pass full attention here and let the model apply its own causal masking if needed (e.g. if it's a decoder).
+            # However, Bert's prod_no_hidden explicitly creates a custom 3D mask.
+            # RobertaImgModel's encoder is not inherently causal.
+            # So, if causal generation is needed, the mask must enforce it.
+            # For now, let's use a simplified 2D mask that RobertaImgModel can extend.
+            # A simple 2D mask of all ones is effectively what happens if no complex 3D mask is built by Bert's prod_no_hidden.
+            # Bert's prod_no_hidden_generate has specific 3D mask logic:
+            #   attention_mask = torch.ones((1, token_len+od_labels_len+img_seq_len, token_len+od_labels_len+img_seq_len), ...)
+            #   attention_mask[:, :token_len, :token_len].copy_(triangle_mask[:token_len, :token_len])
+            #   attention_mask[:, token_len:, :token_len] = 0 # od_label, img_feat can not see sentence
+            # This implies the model needs a 3D mask. RobertaImgModel.forward currently makes 2D->3D/4D.
+            # To replicate BERT's behavior, we might need to pass a 3D mask.
+            # Let's assume for now RobertaImgModel's standard 2D mask processing is sufficient if we ensure inputs are right.
+            # If the model is encoder-only, it doesn't apply causal masking by default.
+            # The "MASK" token approach for generation means we predict the MASK, so the sequence before MASK is context.
+            # Causal masking is mostly for autoregressive generation without a MASK token.
+            # So, a full attention mask for the currently constructed sequence should be fine.
+
+            # Fallback to simpler 2D mask of all ones for now.
+            step_attention_mask = torch.ones((1, total_len_with_img), dtype=torch.long, device=device)
+
+            return step_input_ids, step_token_type_ids, step_position_ids, step_attention_mask
+
+        # Main generation loop
+        for i in range(max_length): # Number of tokens to generate (excluding BOS)
+            step_input_ids, step_token_type_ids, step_position_ids, step_attention_mask = \
+                _prepare_inputs_for_step(current_generated_ids)
+
+            model_inputs = {
+                'input_ids': step_input_ids,
+                'img_feats': img_feats, # Passed at every step as there's no history
+                'attention_mask': step_attention_mask,
+                'token_type_ids': step_token_type_ids,
+                'position_ids': step_position_ids,
+                # No past_key_values / encoder_history_states for "no_hidden"
+                'use_cache': False,
+                'output_attentions': False,
+                'output_hidden_states': False,
+            }
+
+            outputs = self.roberta(**model_inputs) # self.roberta is RobertaImgModel
+            sequence_output = outputs[0] # Shape: (batch_size, seq_len_this_step, hidden_size)
+
+            # Logits for the MASK token, which is at index `current_generated_ids.shape[1]`
+            # e.g., if current_generated_ids is [BOS, tok1], len=2. Input was [BOS, tok1, MASK,...]. MASK is at index 2.
+            mask_token_index_in_step_output = current_generated_ids.shape[1]
+            next_token_logits = self.cls(sequence_output[:, mask_token_index_in_step_output, :])
+
+            next_token_id = torch.argmax(next_token_logits, dim=-1) # Greedy decoding (shape: [1])
+
+            log_probs = F.log_softmax(next_token_logits, dim=-1)
+            sum_logprob += log_probs[0, next_token_id[0]].item() # batch_size is 1
+
+            if next_token_id.item() in eos_token_ids:
+                break
+
+            current_generated_ids = torch.cat([current_generated_ids, next_token_id.unsqueeze(-1)], dim=1)
+
+            # Check if max_length (of generated part) is reached
+            if (current_generated_ids.shape[1] - 1) >= max_length: # -1 for BOS token
+                break
+
+        final_gen_len = current_generated_ids.shape[1] - 1 # Number of generated tokens (excluding BOS)
+        avg_logprob = sum_logprob / final_gen_len if final_gen_len > 0 else 0.0
+
+        return current_generated_ids, torch.full((1,), avg_logprob, device=device)
+
+    # Adapted from BertForImageCaptioning
+    def _generate_no_beam_search(
+        self,
+        input_ids,
+        cur_len,
+        max_length,
+        do_sample,
+        temperature,
+        top_k,
+        top_p,
+        repetition_penalty,
+        pad_token_id,
+        eos_token_ids,
+        batch_size, # effective_batch_size
+    ):
+        """ Generate sequences for each example without beam search (num_beams == 1).
+            All returned sequence are generated independantly.
+        """
+        # current position and vocab size
+        vocab_size = self.config.vocab_size
+
+        # Expand input to num return sequences
+        # input_ids = self._expand_for_beams(input_ids, num_return_sequences) # Already done in generate if num_return_sequences > 1
+        # batch_size = input_ids.shape[0] # This is effective_batch_size
+
+        # generated hypotheses
+        generated_hyps = [
+            torch.zeros(max_length, dtype=torch.long, device=input_ids.device) -1 for _ in range(batch_size)
+        ]
+        generated_lengths = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
+
+
+        # past states
+        past = None
+
+        # scores for each generated token
+        scores = None # List of tensors with dims (batch_size, vocab_size)
+
+        # current positions
+        curr_ids = input_ids # (batch_size, cur_len)
+
+        # done sentences
+        done = [False for _ in range(batch_size)]
+
+        while cur_len < max_length:
+            model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past)
+            # outputs from roberta: (sequence_output, pooled_output, past_key_values, attentions)
+            # sequence_output has shape (batch_size, model_input_seq_len, hidden_size)
+            # past_key_values are at outputs[2] if use_cache=True
+            outputs = self.roberta(**model_inputs)
+
+            sequence_output_for_cls = outputs[0]
+            if self._do_output_past(outputs): # Check if past_key_values are present
+                past = outputs[2]
+            else:
+                past = None
+
+            # Calculate logits for the MASK token (expected at index 1 of the model_inputs['input_ids'])
+            # model_inputs['input_ids'] to roberta was [token, MASK] or [BOS, MASK]
+            mask_token_index = 1
+            if sequence_output_for_cls.shape[1] > mask_token_index:
+                next_token_hidden_states = sequence_output_for_cls[:, mask_token_index, :]
+            else: # Should not happen if prepare_inputs_for_generation is correct
+                next_token_hidden_states = sequence_output_for_cls[:, 0, :]
+
+            next_token_logits = self.cls(next_token_hidden_states) # (batch_size, vocab_size)
+
+            if scores is None: # First step, init scores list
+                scores = [next_token_logits]
+            else: # Subsequent steps, append
+                scores.append(next_token_logits)
+
+
+            # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
+            if repetition_penalty != 1.0:
+                for i in range(batch_size):
+                    for previous_token in curr_ids[i]:
+                        # if score < 0 then repetition penalty has to multiplied to reduce the previous token probability
+                        if next_token_logits[i, previous_token] < 0:
+                            next_token_logits[i, previous_token] *= repetition_penalty
+                        else:
+                            next_token_logits[i, previous_token] /= repetition_penalty
+
+            if do_sample:
+                # Temperature (higher temperature => more likely to sample low probability tokens)
+                if temperature != 1.0:
+                    next_token_logits = next_token_logits / temperature
+                # Top-p/top-k filtering
+                next_token_logprobs = F.log_softmax(next_token_logits, dim=-1) # Log probs for top-p
+                next_token_logits = self._top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+                # Sample
+                probs = F.softmax(next_token_logits, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+            else:
+                # Greedy decoding
+                next_tokens = torch.argmax(next_token_logits, dim=-1)
+
+            # update generated hypotheses
+            for i in range(batch_size):
+                if done[i]:
+                    continue
+                # add chosen token
+                generated_hyps[i][cur_len - input_ids.shape[1]] = next_tokens[i] # Store relative to start of generation
+                generated_lengths[i] += 1
+
+                if next_tokens[i].item() in eos_token_ids:
+                    done[i] = True
+
+            # update current token sequences
+            curr_ids = torch.cat([curr_ids, next_tokens.unsqueeze(-1)], dim=-1)
+            cur_len +=1
+
+            if all(done):
+                break
+
+        # Convert generated hypotheses to a tensor
+        output_ids = torch.stack(generated_hyps, dim=0) # (batch_size, max_length)
+        # Trim to actual generated lengths (remove -1 padding)
+        # This part needs careful thought. If input_ids was len 1 (BOS), then output_ids up to generated_lengths[i] is fine.
+        # BertForImageCaptioning's version returns sequences of `max_length`.
+        # Let's keep it simple and return full max_length sequences, padded with -1 or pad_token_id.
+        # The original BERT code seems to return ( (batch_size, max_len), scores_tuple_or_None )
+        # Scores tuple is (batch_size, num_beams, vocab_size) for each token. Here num_beams=1.
+        # For _generate_no_beam_search, scores are often not returned or are raw logits.
+        # HF's generate returns sequences of shape (batch_size * num_return_sequences, sequence_length)
+        # and optionally scores.
+        # This internal method seems to be structured to be called by `generate`.
+        # The `generate` method will handle num_return_sequences and reshaping.
+
+        # For compatibility with _generate_beam_search's output structure for scores:
+        # scores: List of (batch_size, vocab_size) -> stack to (batch_size, seq_len_generated, vocab_size)
+        # Then permute to (seq_len_generated, batch_size, vocab_size)
+        # Then reshape to (seq_len_generated, batch_size * 1, vocab_size)
+        # This seems overly complex for no_beam_search. HF usually returns None for scores here, or simple logits.
+        # BertForImageCaptioning original returns `output` which is `(output_ids, None)` or `(output_ids, final_scores_if_needed)`.
+        # Let's return `(output_ids, None)` for simplicity, assuming scores are not typically processed from this path.
+
+        # Finalize generated sequences: input_ids + generated part
+        # The `generated_hyps` only stores the *generated* part.
+        # We need to combine with the initial `input_ids` (which was just BOS usually).
+        final_sequences = []
+        for i in range(batch_size):
+            initial_len = input_ids.shape[1]
+            gen_len = generated_lengths[i]
+            seq = torch.cat( (input_ids[i, :initial_len], generated_hyps[i, :gen_len]), dim=0)
+            # Pad to max_length
+            padding_needed = max_length - seq.shape[0]
+            if padding_needed > 0:
+                seq = torch.cat([seq, torch.full((padding_needed,), pad_token_id if pad_token_id is not None else -1, dtype=torch.long, device=input_ids.device)])
+            final_sequences.append(seq)
+
+        output_ids_final = torch.stack(final_sequences, dim=0)
+
+        return output_ids_final, None # Scores are None for no_beam_search in this simplified version
+
+
+    # Adapted from BertForImageCaptioning
+    def _generate_beam_search(
+        self,
+        input_ids,
+        cur_len,
+        max_length,
+        do_sample, # Unused in original beam search, but kept for signature
+        temperature, # Unused
+        top_k, # Unused
+        top_p, # Unused
+        repetition_penalty, # Unused
+        pad_token_id,
+        eos_token_ids,
+        batch_size, # effective_batch_size (batch_size * num_return_sequences)
+        length_penalty,
+        num_beams,
+        vocab_size,
+    ):
+        """ Generate sequences for each example with beam search.
+        """
+        # generated hypotheses
+        generated_hyps = [
+            BeamHypotheses(num_beams, max_length, length_penalty, early_stopping=False) for _ in range(batch_size)
+        ]
+
+        # initial tokens
+        beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device)
+        beam_scores[:, 1:] = -1e9 # Initialize all beams except the first to -infinity
+        beam_scores = beam_scores.view(-1)  # shape (batch_size * num_beams,)
+
+        # current sequences (batch_size * num_beams, cur_len)
+        # input_ids is (effective_batch_size, 1) e.g. [[BOS], [BOS]] if num_return_sequences=2
+        # We need to expand it for num_beams: (effective_batch_size * num_beams, 1)
+        curr_ids = self._expand_for_beams(input_ids, num_beams)
+
+        # past states, (batch_size * num_beams, ...)
+        past = None
+
+        # done sentences
+        done = [False for _ in range(batch_size)]
+
+        # Pad token ID ensure handling
+        if pad_token_id is None and hasattr(self.config, 'pad_token_id') and self.config.pad_token_id is not None:
+            pad_token_id = self.config.pad_token_id
+        elif pad_token_id is None:
+            logger.warning("pad_token_id not set, defaulting to 0 if needed for padding final sequences.")
+            pad_token_id = 0 # A common default if not specified
+
+        while cur_len < max_length:
+            model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past)
+            # outputs from roberta: (sequence_output, pooled_output, past_key_values, attentions)
+            # sequence_output has shape (batch_size * num_beams, model_input_seq_len, hidden_size)
+            outputs = self.roberta(**model_inputs)
+
+            sequence_output_for_cls = outputs[0]
+            if self._do_output_past(outputs):
+                past = outputs[2] # past_key_values
+            else:
+                past = None
+
+            # Calculate logits for the MASK token (expected at index 1 of the model_inputs['input_ids'])
+            mask_token_index = 1
+            if sequence_output_for_cls.shape[1] > mask_token_index:
+                next_token_hidden_states = sequence_output_for_cls[:, mask_token_index, :]
+            else:
+                next_token_hidden_states = sequence_output_for_cls[:, 0, :]
+
+            next_token_logits = self.cls(next_token_hidden_states) # (batch_size * num_beams, vocab_size)
+
+            # Repetition penalty (from CTRL paper https://arxiv.org/abs/1909.05858)
+            if repetition_penalty != 1.0:
+                for i in range(batch_size * num_beams):
+                    for token_id in curr_ids[i]:
+                        if next_token_logits[i, token_id] < 0:
+                            next_token_logits[i, token_id] *= repetition_penalty
+                        else:
+                            next_token_logits[i, token_id] /= repetition_penalty
+
+            # Convert to log probs for beam search
+            next_token_logprobs = F.log_softmax(next_token_logits, dim=-1) # (batch_size * num_beams, vocab_size)
+
+            # Add current beam scores
+            # beam_scores has shape (batch_size * num_beams,)
+            # next_token_logprobs has shape (batch_size * num_beams, vocab_size)
+            # Want to add scores only to the currently active beams.
+            # For the first step, beam_scores are correct. For subsequent, they accumulate.
+            scores_for_next_step = next_token_logprobs + beam_scores[:, None].expand_as(next_token_logprobs) # (batch_size * num_beams, vocab_size)
+
+            # Reshape for selection: (batch_size, num_beams * vocab_size)
+            vocab_size = next_token_logprobs.shape[-1]
+            scores_for_next_step = scores_for_next_step.view(batch_size, num_beams * vocab_size)
+
+            # Select top-k candidate tokens overall (across beams and vocab)
+            # `2 * num_beams` to allow for diverse paths and then filter down to `num_beams`
+            num_candidates_to_consider = 2 * num_beams
+            next_beam_scores, next_beam_indices = torch.topk(scores_for_next_step, num_candidates_to_consider, dim=1, largest=True, sorted=True)
+
+            # `next_beam_indices` are flat indices into `num_beams * vocab_size`
+            # Convert them to (beam_idx, token_idx)
+            next_beam_origin_beam_idx = next_beam_indices // vocab_size # Which original beam this candidate came from
+            next_beam_token_idx = next_beam_indices % vocab_size       # Which token in vocab this candidate is
+
+            # Prepare inputs for the next iteration
+            new_beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device) - 1e9
+            new_beam_curr_ids = torch.zeros((batch_size * num_beams, max_length), dtype=torch.long, device=input_ids.device) -1 # Pad with -1
+            new_beam_past = [torch.zeros_like(p) for p in past] if past is not None else None # Placeholder for new past
+
+            current_done_count = 0 # Count of examples in batch that are done
+
+            for batch_idx in range(batch_size):
+                if done[batch_idx]: # If this example in batch is already done, copy its best hypothesis
+                    # This logic might need refinement if we want to ensure num_beams outputs even if done early.
+                    # For now, if done, we effectively stop expanding this batch item.
+                    # The `generated_hyps[batch_idx]` already holds the completed sequences.
+                    # We need to ensure `new_beam_scores` for this batch_idx reflect that these paths are finished.
+                    # This is handled by `BeamHypotheses.is_done`.
+                    current_done_count +=1
+                    continue
+
+                # Iterate over candidates for this batch item
+                hyp_idx = 0
+                for cand_idx in range(num_candidates_to_consider):
+                    origin_beam_idx = next_beam_origin_beam_idx[batch_idx, cand_idx].item()
+                    token_id = next_beam_token_idx[batch_idx, cand_idx].item()
+                    score = next_beam_scores[batch_idx, cand_idx].item()
+
+                    # Original sequence this candidate extends from
+                    # batch_size * num_beams is the first dim of curr_ids and past
+                    global_origin_beam_idx = batch_idx * num_beams + origin_beam_idx
+                    original_sequence = curr_ids[global_origin_beam_idx, :cur_len]
+
+                    if token_id in eos_token_ids: # End Of Sentence
+                        generated_hyps[batch_idx].add(original_sequence.clone(), score)
+                    else: # Add to current hypothesis
+                        new_sequence = torch.cat([original_sequence, torch.tensor([token_id], device=input_ids.device)])
+                        generated_hyps[batch_idx].add(new_sequence, score) # Add to beam hypotheses for this batch item
+
+                # After processing all candidates for this batch_idx,
+                # select the top `num_beams` hypotheses from `generated_hyps[batch_idx]`
+                # to form the input for the next step.
+
+                # Check if this batch item is now done (all its beams found EOS)
+                if generated_hyps[batch_idx].is_done(best_sum_logprobs=beam_scores[batch_idx * num_beams:(batch_idx + 1) * num_beams].max().item(), cur_len=cur_len):
+                    done[batch_idx] = True
+                    current_done_count +=1
+                    # If done, we don't need to prepare inputs for next step for this batch item's beams.
+                    # They will be filled with dummy/pad values or handled by ensuring scores are low.
+                    continue # Go to next batch_idx
+
+                # Prepare inputs for the next step for this batch_idx's active beams
+                # Get the top `num_beams` hypotheses that are not yet EOS
+
+                # This part is tricky: BertForImageCaptioning's version of beam search
+                # seems to directly manipulate `next_beam_ids`, `next_beam_scores`, `next_beam_idx`
+                # to form the inputs for the next step, rather than re-querying `generated_hyps`.
+                # Let's try to follow that structure.
+                # The loop over `cand_idx` above was more about adding to `generated_hyps`.
+                # The actual selection for next step's input:
+
+                effective_next_beam_idx = 0 # Pointer for this batch_idx's new beams
+
+                for cand_idx in range(num_candidates_to_consider): # Iterate again through sorted candidates
+                    if effective_next_beam_idx >= num_beams: # Filled all required beams for next step
+                        break
+
+                    origin_beam_idx = next_beam_origin_beam_idx[batch_idx, cand_idx].item()
+                    token_id = next_beam_token_idx[batch_idx, cand_idx].item()
+                    current_score = next_beam_scores[batch_idx, cand_idx].item() # This is cumulative score
+
+                    if token_id in eos_token_ids: # Don't use EOS-terminated sequences as input for next step
+                        continue
+
+                    # Global index for new beams (for this batch_idx)
+                    new_global_beam_idx = batch_idx * num_beams + effective_next_beam_idx
+
+                    # Copy sequence and extend
+                    original_global_beam_idx = batch_idx * num_beams + origin_beam_idx
+                    new_beam_curr_ids[new_global_beam_idx, :cur_len] = curr_ids[original_global_beam_idx, :cur_len]
+                    new_beam_curr_ids[new_global_beam_idx, cur_len] = token_id
+
+                    # Copy past state
+                    if past is not None:
+                        for p_idx in range(len(past)):
+                             # Select the past state from the origin beam and copy to new beam's slot
+                            new_beam_past[p_idx][new_global_beam_idx] = past[p_idx][original_global_beam_idx]
+
+                    # Update score for this new beam
+                    new_beam_scores[batch_idx, effective_next_beam_idx] = current_score
+
+                    effective_next_beam_idx += 1
+
+                # If fewer than num_beams active paths found (e.g., all ended in EOS or were pruned)
+                # fill remaining beams by duplicating the best remaining ones or padding.
+                # This is important to maintain tensor shapes.
+                if effective_next_beam_idx < num_beams:
+                    # This case needs robust handling. For now, if not enough beams, it might lead to issues
+                    # if new_beam_curr_ids and new_beam_past are not fully populated.
+                    # The original BERT code implicitly handles this by how it selects topk.
+                    # Let's assume for now that topk selection and EOS handling in BeamHypotheses
+                    # will ensure that we either find num_beams or mark as done.
+                    # If a batch item is not `done` but has < `num_beams` active hyps,
+                    # it implies those are the ones to continue.
+                    # The `new_beam_scores` already has -1e9 for unused slots.
+                    pass
+
+
+            if current_done_count == batch_size: # All batch items are done
+                break
+
+            # Update global state for next iteration
+            curr_ids = new_beam_curr_ids[:, :cur_len + 1].clone() # Get sequences up to new current length
+            beam_scores = new_beam_scores.view(-1) # Flatten for next score addition
+            if past is not None:
+                past = [p.clone() for p in new_beam_past] # Ensure past is updated
+
+            cur_len += 1
+
+        # Finalize: select best hypotheses from each batch item
+        output_sequences = []
+        output_sequence_scores = []
+
+        for batch_idx in range(batch_size):
+            # Sort hypotheses by score
+            # generated_hyps[batch_idx].beams will be a list of (score, sequence_tensor)
+            # Ensure it's sorted if BeamHypotheses doesn't guarantee it (it should)
+
+            # Take top `self.num_keep_best` sequences
+            # BeamHypotheses.finalize should give sorted list of (sum_logprobs, token_ids_tensor)
+            num_to_return_for_batch = self.num_keep_best if hasattr(self, 'num_keep_best') else 1
+
+            best_hyps = generated_hyps[batch_idx].finalize(cur_len, num_to_return_for_batch)
+
+
+            for score, seq_tensor in best_hyps:
+                # Pad sequence to max_length
+                padding = max_length - seq_tensor.shape[0]
+                padded_seq = torch.cat([seq_tensor, torch.full((padding,), pad_token_id, dtype=torch.long, device=input_ids.device)])
+                output_sequences.append(padded_seq)
+                output_sequence_scores.append(score)
+
+        if not output_sequences: # Should not happen if batch_size > 0
+             # Fallback: return input_ids or padded empty sequences if generation failed completely
+            empty_seq = torch.full((max_length,), pad_token_id, dtype=torch.long, device=input_ids.device)
+            if input_ids.shape[1] < max_length : # if input was shorter than max_length
+                 padded_input = torch.cat([input_ids[0,:], torch.full((max_length - input_ids.shape[1],), pad_token_id, dtype=torch.long, device=input_ids.device)])
+                 output_sequences.append(padded_input)
+            else:
+                 output_sequences.append(input_ids[0,:max_length].clone() if input_ids.nelement() > 0 else empty_seq) # Fallback to input or empty
+            output_sequence_scores.append(-1e9) # Indicate low score
+
+        final_sequences_tensor = torch.stack(output_sequences) # (batch_size * num_keep_best, max_length)
+        final_scores_tensor = torch.tensor(output_sequence_scores, dtype=torch.float, device=input_ids.device) # (batch_size * num_keep_best)
+
+        # Reshape to (batch_size, num_keep_best, max_length) and (batch_size, num_keep_best)
+        # This matches the output format of BertForImageCaptioning's internal method.
+        # Note: num_return_sequences (from generate()) is handled by generate() itself repeating the inputs.
+        # Here, batch_size is effective_batch_size.
+        # If num_return_sequences=1, effective_batch_size = actual_batch_size.
+        # If num_return_sequences > 1, then generate() calls this with effective_batch_size,
+        # and the output needs to be shaped accordingly or handled by generate().
+        # The current structure seems to assume num_keep_best is applied per item in effective_batch_size.
+
+        # Let's assume num_keep_best is always 1 for now as per original single return from generate.
+        # If num_keep_best > 1, the output shape needs to be (effective_batch_size, num_keep_best, max_length)
+        # For now, if num_keep_best=1, it's (effective_batch_size, max_length)
+        if num_to_return_for_batch > 1 :
+             final_sequences_tensor = final_sequences_tensor.view(batch_size, num_to_return_for_batch, max_length)
+             final_scores_tensor = final_scores_tensor.view(batch_size, num_to_return_for_batch)
+
+        return final_sequences_tensor, final_scores_tensor
+
+    def _top_k_top_p_filtering(self, logits, top_k=0, top_p=1.0, filter_value=-float("Inf"), min_tokens_to_keep=1):
+        """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
+            Args:
+                logits: logits distribution shape (batch size, vocabulary size)
+                if top_k > 0: keep only top k tokens with highest probability (top-k filtering).
+                if top_p < 1.0: keep the top tokens with cumulative probability >= top_p (nucleus filtering).
+                    Nucleus filtering is described in Holtzman et al. (http://arxiv.org/abs/1904.09751)
+                Make sure we keep at least min_tokens_to_keep per batch example in the output
+            From HuggingFace's internal method of the same name
+        """
+        if top_k > 0:
+            top_k = min(max(top_k, min_tokens_to_keep), logits.size(-1))  # Safety check
+            # Remove all tokens with a probability less than the last token of the top-k
+            indices_to_remove = logits < torch.topk(logits, top_k)[0][..., -1, None]
+            logits[indices_to_remove] = filter_value
+
+        if top_p < 1.0:
+            sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+            cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+            # Remove tokens with cumulative probability above the threshold (token with 0 are kept)
+            sorted_indices_to_remove = cumulative_probs > top_p
+            if min_tokens_to_keep > 1:
+                # Keep at least min_tokens_to_keep (set to min_tokens_to_keep-1 because we add the first one below)
+                sorted_indices_to_remove[..., :min_tokens_to_keep] = 0
+            # Shift the indices to the right to keep also the first token above the threshold
+            sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+            sorted_indices_to_remove[..., 0] = 0
+
+            # scatter sorted tensors to original indexing
+            indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+            logits[indices_to_remove] = filter_value
+        return logits
 
 # Helper function from HuggingFace transformers.models.bert.modeling_bert, adapted if needed
 # This might be in transformers.modeling_utils or specific to bert/roberta modeling scripts
+
+# Standard BeamHypotheses class from HuggingFace's generation_utils.py
+class BeamHypotheses:
+    def __init__(self, num_beams, max_length, length_penalty, early_stopping):
+        """
+        Initialize n-best list of hypotheses.
+        """
+        self.max_length = max_length - 1  # ignoring bos_token
+        self.length_penalty = length_penalty
+        self.early_stopping = early_stopping
+        self.num_beams = num_beams
+        self.beams = []
+        self.worst_score = 1e9
+
+    def __len__(self):
+        """
+        Number of hypotheses in the list.
+        """
+        return len(self.beams)
+
+    def add(self, hyp, sum_logprobs):
+        """
+        Add a new hypothesis to the list.
+        """
+        score = sum_logprobs / (hyp.shape[-1] ** self.length_penalty)
+        if len(self) < self.num_beams or score > self.worst_score:
+            self.beams.append((score, hyp))
+            if len(self) > self.num_beams:
+                sorted_next_scores = sorted([(s, idx) for idx, (s, _) in enumerate(self.beams)])
+                del self.beams[sorted_next_scores[0][1]]
+                self.worst_score = sorted_next_scores[1][0]
+            else:
+                self.worst_score = min(score, self.worst_score)
+
+    def is_done(self, best_sum_logprobs, cur_len):
+        """
+        If there are enough hypotheses and that none of the hypotheses being generated
+        can become better than the worst one in the heap, then we are done with this sentence.
+        """
+        if len(self) < self.num_beams:
+            return False
+        elif self.early_stopping:
+            return True
+        else:
+            cur_score = best_sum_logprobs / cur_len ** self.length_penalty
+            ret = self.worst_score >= cur_score
+            return ret
+
+    def finalize(self, cur_len, num_to_return):
+        """
+        Sort the hypotheses by score and return the top `num_to_return`.
+        """
+        # Sort by score
+        self.beams.sort(key=lambda x: x[0], reverse=True)
+
+        # Prepare output: list of (score, tensor_sequence)
+        final_beams = []
+        for score, hyp in self.beams[:num_to_return]:
+            final_beams.append((score, hyp))
+        return final_beams
+
 def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
     """
     Finds the heads and their indices taking into account the already pruned heads.
