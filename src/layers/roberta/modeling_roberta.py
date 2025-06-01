@@ -1937,7 +1937,7 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         for i in range(batch_size):
             initial_len = input_ids.shape[1]
             gen_len = generated_lengths[i]
-            seq = torch.cat( (input_ids[i, :initial_len], generated_hyps[i, :gen_len]), dim=0)
+            seq = torch.cat( (input_ids[i, :initial_len], generated_hyps[i][:gen_len]), dim=0)
             # Pad to max_length
             padding_needed = max_length - seq.shape[0]
             if padding_needed > 0:
