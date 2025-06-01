@@ -244,36 +244,46 @@ class CaptionTensorizer(object):
             else:
                 masked_idx = self.get_text_mask_idx(seq_a_len, seq_len, text_meta)
                 try:
-                    masked_token = [tokens[i] for i in masked_idx]
+                    masked_token_original_values = [tokens[i] for i in masked_idx]
                 except Exception as e:
                     overflow_idx = []
                     for i in masked_idx:
                         if i >= len(tokens) or i < 0:
                             overflow_idx.append(i)
                     raise ValueError(f"Error {e}\nOverflow: {overflow_idx} in tokens {tokens}")
+
+                # Apply masking to the 'tokens' list (this part remains the same)
                 for pos in masked_idx:
                     if random.random() <= 0.8:
-                        # 80% chance to be a ['MASK'] token
                         tokens[pos] = self.tokenizer.mask_token
                     elif random.random() <= 0.5:
-                        # 10% chance to be a random word ((1-0.8)*0.5)
                         tokens[pos] = self.tokenizer.get_random_token()
                     else:
-                        # 10% chance to remain the same (1-0.8-0.1)
-                        pass
+                        pass  # 10% chance to remain the same
 
                 masked_pos = torch.zeros(self.max_seq_len, dtype=torch.int)
                 masked_pos[masked_idx] = 1
                 
-                # get the actual number of masked tokens
-                num_masked = len(masked_token)
-                mlm_targets = self.tokenizer.convert_tokens_to_ids(masked_token)
-                if num_masked < self.max_masked_tokens:
-                    mlm_targets = mlm_targets + ([-1] * (self.max_masked_tokens - num_masked))
-                assert len(mlm_targets) == self.max_masked_tokens, f"mismatch in len(masked_ids) {len(mlm_targets)} vs. max_masked_tokens {self.max_masked_tokens}"
+                # Initialize mlm_targets with -1 (ignore_index) for all positions up to max_seq_len
+                mlm_targets = [-1] * self.max_seq_len
+
+                original_token_ids_for_masked_positions = self.tokenizer.convert_tokens_to_ids(masked_token_original_values)
+
+                for i, pos in enumerate(masked_idx):
+                    if pos < self.max_seq_len: # Ensure position is within bounds
+                        mlm_targets[pos] = original_token_ids_for_masked_positions[i]
+
+                # The assert for max_masked_tokens is no longer relevant for the length of mlm_targets.
+                # mlm_targets will always have length self.max_seq_len.
+                # The number of actual masked tokens is len(masked_idx), which is already
+                # controlled by self.max_masked_tokens in get_text_mask_idx.
+
         elif not self.is_train:
+            # For evaluation, mlm_targets is not used for loss, so can be None or all -1s.
+            # masked_pos indicates all positions (or relevant ones for generation) could be of interest.
+            # The original code sets masked_pos to all ones.
             masked_pos = torch.ones(self.max_seq_len, dtype=torch.int)
-            mlm_targets = None
+            mlm_targets = [-1] * self.max_seq_len # Or None, consistent with how it's handled later
         
         return tokens, masked_pos, mlm_targets
     
