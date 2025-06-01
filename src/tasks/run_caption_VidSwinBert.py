@@ -424,14 +424,41 @@ def test(args, test_dataloader, model, tokenizer, predict_file):
                 else:
                     outputs = model(**inputs)
                 time_meter += time.time() - tic
-                all_caps = outputs[0]  # batch_size * num_keep_best * max_len
-                all_confs = torch.exp(outputs[1])
 
-                for img_key, caps, confs in zip(img_keys, all_caps, all_confs):
+                all_caps_raw = outputs[0]
+                all_logprobs_raw = outputs[1]
+
+                if all_logprobs_raw is None:
+                    # Handle case where scores might still be None if a path was missed (defensive)
+                    # This should not happen with the previous fix, but as a safeguard:
+                    logger.warning("Logprobs from model output is None, using zero confidence.")
+                    # Create a dummy tensor for logprobs with a very low value
+                    if args.num_beams == 1:
+                        all_logprobs_raw = torch.full((all_caps_raw.shape[0],), -float('inf'), device=all_caps_raw.device)
+                    else:
+                        all_logprobs_raw = torch.full((all_caps_raw.shape[0], all_caps_raw.shape[1]), -float('inf'), device=all_caps_raw.device)
+
+
+                # Ensure all_caps and all_confs have a consistent num_keep_best dimension
+                if args.num_beams == 1:
+                    # For _generate_no_beam_search, all_caps_raw is (B, M), all_logprobs_raw is (B,)
+                    # We want all_caps to be (B, 1, M) and all_confs to be (B, 1)
+                    # This matches the structure expected by num_keep_best=1 from beam search.
+                    all_caps_intermediate = all_caps_raw.unsqueeze(1) # (B, 1, M)
+                    all_confs = torch.exp(all_logprobs_raw.unsqueeze(1)) # (B, 1)
+                else:
+                    # For _generate_beam_search, all_caps_raw is (B, K, M), all_logprobs_raw is (B, K)
+                    # K is num_keep_best
+                    all_caps_intermediate = all_caps_raw
+                    all_confs = torch.exp(all_logprobs_raw)
+
+                for img_key, caps_for_image, confs_for_image in zip(img_keys, all_caps_intermediate, all_confs):
+                    # caps_for_image is now always (K or 1, M)
+                    # confs_for_image is now always (K or 1,)
                     res = []
-                    for cap, conf in zip(caps, confs):
-                        cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
-                        res.append({'caption': cap, 'conf': conf.item()})
+                    for cap_token_ids, conf_scalar in zip(caps_for_image, confs_for_image):
+                        cap_text = tokenizer.decode(cap_token_ids.tolist(), skip_special_tokens=True)
+                        res.append({'caption': cap_text, 'conf': conf_scalar.item()})
                     if isinstance(img_key, torch.Tensor):
                         img_key = img_key.item()
                     yield img_key, json.dumps(res)
