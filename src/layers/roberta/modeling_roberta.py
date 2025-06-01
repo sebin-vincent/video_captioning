@@ -1130,6 +1130,17 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             **model_kwargs # Standard HF model_kwargs
             ):
         """ Generates captions given image features """
+
+        # If is_decode is True (i.e., we are in generation/inference mode for captioning),
+        # ignore any provided input_ids from the dataloader to ensure we start fresh with BOS.
+        # The OD labels logic below will still use model_kwargs if add_od_labels is True.
+        if is_decode:
+            input_ids = None
+            # Other inputs like attention_mask, token_type_ids, masked_pos from the dataloader
+            # are also less relevant if we start fresh with BOS for the actual sequence construction.
+            # They are, however, used by self._expand_for_beams if num_beams > 1 or num_return_sequences > 1.
+            # The critical part is that the model's first step input_ids becomes just [BOS].
+
         # This method adapts BertForImageCaptioning.generate
 
         # Standard HuggingFace generate arguments not in BertForImageCaptioning's original signature:
@@ -1824,12 +1835,11 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         ]
         generated_lengths = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
 
+        # For accumulating log probabilities of chosen tokens
+        sum_logprobs = torch.zeros(batch_size, dtype=torch.float, device=input_ids.device)
 
         # past states
         past = None
-
-        # scores for each generated token
-        scores = None # List of tensors with dims (batch_size, vocab_size)
 
         # current positions
         curr_ids = input_ids # (batch_size, cur_len)
@@ -1860,43 +1870,44 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
 
             next_token_logits = self.cls(next_token_hidden_states) # (batch_size, vocab_size)
 
-            if scores is None: # First step, init scores list
-                scores = [next_token_logits]
-            else: # Subsequent steps, append
-                scores.append(next_token_logits)
-
-
-            # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
+            # repetition penalty (remains the same)
             if repetition_penalty != 1.0:
                 for i in range(batch_size):
                     for previous_token in curr_ids[i]:
-                        # if score < 0 then repetition penalty has to multiplied to reduce the previous token probability
                         if next_token_logits[i, previous_token] < 0:
                             next_token_logits[i, previous_token] *= repetition_penalty
                         else:
                             next_token_logits[i, previous_token] /= repetition_penalty
 
+            # Calculate log probabilities for chosen tokens
+            next_token_logprobs_all_vocab = F.log_softmax(next_token_logits, dim=-1) # (batch_size, vocab_size)
+
             if do_sample:
-                # Temperature (higher temperature => more likely to sample low probability tokens)
+                # Temperature
                 if temperature != 1.0:
-                    next_token_logits = next_token_logits / temperature
+                    next_token_logits_for_sampling = next_token_logits / temperature
+                else:
+                    next_token_logits_for_sampling = next_token_logits
                 # Top-p/top-k filtering
-                next_token_logprobs = F.log_softmax(next_token_logits, dim=-1) # Log probs for top-p
-                next_token_logits = self._top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
+                next_token_logits_for_sampling = self._top_k_top_p_filtering(next_token_logits_for_sampling, top_k=top_k, top_p=top_p)
                 # Sample
-                probs = F.softmax(next_token_logits, dim=-1)
-                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+                probs = F.softmax(next_token_logits_for_sampling, dim=-1)
+                next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1) # (batch_size,)
             else:
                 # Greedy decoding
-                next_tokens = torch.argmax(next_token_logits, dim=-1)
+                next_tokens = torch.argmax(next_token_logits, dim=-1) # (batch_size,)
 
-            # update generated hypotheses
+            # Gather the log probabilities of the chosen tokens
+            # next_tokens needs to be shaped as (batch_size, 1) for gather
+            chosen_token_logprobs = torch.gather(next_token_logprobs_all_vocab, 1, next_tokens.unsqueeze(-1)).squeeze(-1) # (batch_size,)
+
+            # update generated hypotheses and sum_logprobs
             for i in range(batch_size):
                 if done[i]:
                     continue
-                # add chosen token
-                generated_hyps[i][cur_len - input_ids.shape[1]] = next_tokens[i] # Store relative to start of generation
+                generated_hyps[i][cur_len - input_ids.shape[1]] = next_tokens[i]
                 generated_lengths[i] += 1
+                sum_logprobs[i] += chosen_token_logprobs[i] # Add logprob of the chosen token
 
                 if next_tokens[i].item() in eos_token_ids:
                     done[i] = True
@@ -1937,7 +1948,7 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         for i in range(batch_size):
             initial_len = input_ids.shape[1]
             gen_len = generated_lengths[i]
-            seq = torch.cat( (input_ids[i, :initial_len], generated_hyps[i, :gen_len]), dim=0)
+            seq = torch.cat( (input_ids[i, :initial_len], generated_hyps[i][:gen_len]), dim=0)
             # Pad to max_length
             padding_needed = max_length - seq.shape[0]
             if padding_needed > 0:
@@ -1946,7 +1957,16 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
 
         output_ids_final = torch.stack(final_sequences, dim=0)
 
-        return output_ids_final, None # Scores are None for no_beam_search in this simplified version
+        # Calculate average log probabilities
+        avg_logprobs = torch.zeros(batch_size, dtype=torch.float, device=input_ids.device)
+        for i in range(batch_size):
+            if generated_lengths[i] > 0:
+                avg_logprobs[i] = sum_logprobs[i] / generated_lengths[i]
+            else:
+                # Avoid division by zero; assign a very low logprob if no tokens were generated
+                avg_logprobs[i] = -float('Inf')
+
+        return output_ids_final, avg_logprobs
 
 
     # Adapted from BertForImageCaptioning
