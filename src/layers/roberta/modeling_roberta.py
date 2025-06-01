@@ -1130,6 +1130,17 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             **model_kwargs # Standard HF model_kwargs
             ):
         """ Generates captions given image features """
+
+        # If is_decode is True (i.e., we are in generation/inference mode for captioning),
+        # ignore any provided input_ids from the dataloader to ensure we start fresh with BOS.
+        # The OD labels logic below will still use model_kwargs if add_od_labels is True.
+        if is_decode:
+            input_ids = None
+            # Other inputs like attention_mask, token_type_ids, masked_pos from the dataloader
+            # are also less relevant if we start fresh with BOS for the actual sequence construction.
+            # They are, however, used by self._expand_for_beams if num_beams > 1 or num_return_sequences > 1.
+            # The critical part is that the model's first step input_ids becomes just [BOS].
+
         # This method adapts BertForImageCaptioning.generate
 
         # Standard HuggingFace generate arguments not in BertForImageCaptioning's original signature:
