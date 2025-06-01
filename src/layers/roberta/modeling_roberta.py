@@ -679,8 +679,9 @@ class RobertaImgModel(RobertaPreTrainedModel):
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         # Map encoder_history_states to past_key_values if provided and past_key_values is None
-        if encoder_history_states is not None and past_key_values is None:
-            past_key_values = encoder_history_states # Assuming compatible format
+        # Map encoder_hidden_states to past_key_values if provided and past_key_values is None
+        if encoder_hidden_states is not None and past_key_values is None:
+            past_key_values = encoder_hidden_states  # Assuming compatible format
 
         # Attention mask
         # Handle attention_mask for text and image features
