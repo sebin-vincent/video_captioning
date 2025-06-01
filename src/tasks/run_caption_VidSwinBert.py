@@ -33,6 +33,7 @@ from src.utils.deepspeed import get_deepspeed_config, fp32_to_fp16
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+from src.modeling.load_robert import get_roberta_model # Added for RoBERTa support
 from src.solver import AdamW, WarmupLinearLR
 
 from azureml.core.run import Run
@@ -516,6 +517,7 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument('--text_encoder_type', type=str, default='bert', choices=['bert', 'roberta'], help="Type of text encoder to use (bert or roberta)")
     args = base_config.parse_args()
     return args
 
@@ -563,10 +565,18 @@ def main(args):
 
     # Get Video Swin model 
     swin_model = get_swin_model(args)
-    # Get BERT and tokenizer 
-    bert_model, config, tokenizer = get_bert_model(args)
+    # Get Text Encoder (BERT or RoBERTa) and tokenizer 
+    if args.text_encoder_type == 'roberta':
+        text_encoder_model, config, tokenizer = get_roberta_model(args)
+    elif args.text_encoder_type == 'bert':
+        text_encoder_model, config, tokenizer = get_bert_model(args)
+    else:
+        raise ValueError(f"Unsupported text_encoder_type: {args.text_encoder_type}")
     # build SwinBERT based on training configs
-    vl_transformer = VideoTransformer(args, config, swin_model, bert_model) 
+    vl_transformer = VideoTransformer(args, config, swin_model, text_encoder_model)
+    word_embeddings_layer = vl_transformer.trans_encoder.roberta.embeddings.word_embeddings
+    num_embeddings_in_layer = word_embeddings_layer.num_embeddings
+    print(f"nn.Embedding Layer (word_embeddings) num_embeddings: {num_embeddings_in_layer}")
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 
     if args.do_eval:
