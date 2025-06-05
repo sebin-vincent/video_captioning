@@ -73,12 +73,32 @@ def inference(args, video_path, model, tokenizer, tensorizer):
     data_sample = tensorizer.tensorize_example_e2e('', preproc_frames)
     data_sample = tuple(t.to(args.device) for t in data_sample)
     with torch.no_grad():
+        # Adjust generation hyperparameters if they are at their defaults
+        effective_repetition_penalty = args.repetition_penalty
+        if hasattr(args, 'repetition_penalty') and float(args.repetition_penalty) == 1.0:
+            logger.info(f"Default repetition_penalty is 1.0, changing to 1.2 for potentially better results.")
+            effective_repetition_penalty = 1.2
+
+        effective_length_penalty = args.length_penalty
+        if hasattr(args, 'length_penalty') and float(args.length_penalty) == 0.0:
+            logger.info(f"Default length_penalty is 0.0, changing to 1.0 for potentially better results.")
+            effective_length_penalty = 1.0
+
+        effective_num_beams = args.num_beams
+        if hasattr(args, 'num_beams') and int(args.num_beams) == 1:
+            logger.info(f"Default num_beams is 1, changing to 4 for potentially better beam search results.")
+            effective_num_beams = 4
+            # Also, if num_beams is changed to > 1, ensure do_sample is False, as beam search is not compatible with sampling.
+            if hasattr(args, 'do_sample') and args.do_sample:
+                logger.info(f"num_beams changed to > 1 (now {effective_num_beams}), setting do_sample to False.")
+                args.do_sample = False
+
 
         inputs = {'is_decode': True,
             'input_ids': data_sample[0][None,:], 'attention_mask': data_sample[1][None,:],
             'token_type_ids': data_sample[2][None,:], 'img_feats': data_sample[3][None,:],
             'masked_pos': data_sample[4][None,:],
-            'do_sample': False,
+            'do_sample': args.do_sample, # Use potentially modified args.do_sample
             'bos_token_id': cls_token_id,
             'pad_token_id': pad_token_id,
             'eos_token_ids': [sep_token_id],
@@ -87,15 +107,35 @@ def inference(args, video_path, model, tokenizer, tensorizer):
             'add_od_labels': args.add_od_labels, 'od_labels_start_posid': args.max_seq_a_length,
             # hyperparameters of beam search
             'max_length': args.max_gen_length,
-            'num_beams': args.num_beams,
+            'num_beams': effective_num_beams,
             "temperature": args.temperature,
             "top_k": args.top_k,
             "top_p": args.top_p,
-            "repetition_penalty": args.repetition_penalty,
-            "length_penalty": args.length_penalty,
+            "repetition_penalty": effective_repetition_penalty,
+            "length_penalty": effective_length_penalty,
             "num_return_sequences": args.num_return_sequences,
             "num_keep_best": args.num_keep_best,
         }
+        # Log key generation parameters
+        logger.info("Starting generation with the following parameters:")
+        logger.info(f"  max_length: {inputs['max_length']}")
+        logger.info(f"  num_beams: {inputs['num_beams']}") # Log effective_num_beams
+        logger.info(f"  temperature: {inputs['temperature']}")
+        logger.info(f"  top_k: {inputs['top_k']}")
+        logger.info(f"  top_p: {inputs['top_p']}")
+        logger.info(f"  repetition_penalty: {inputs['repetition_penalty']}") # Log effective_repetition_penalty
+        logger.info(f"  length_penalty: {inputs['length_penalty']}") # Log effective_length_penalty
+        logger.info(f"  num_return_sequences: {inputs['num_return_sequences']}")
+        logger.info(f"  num_keep_best: {inputs['num_keep_best']}")
+        logger.info(f"  do_sample: {inputs['do_sample']}")
+        logger.info(f"  bos_token_id: {inputs['bos_token_id']}")
+        logger.info(f"  pad_token_id: {inputs['pad_token_id']}")
+        logger.info(f"  eos_token_ids: {inputs['eos_token_ids']}")
+        logger.info(f"  mask_token_id: {inputs['mask_token_id']}")
+        logger.info(f"  add_od_labels: {inputs['add_od_labels']}")
+        if inputs['add_od_labels']:
+            logger.info(f"  od_labels_start_posid: {inputs['od_labels_start_posid']}")
+
         tic = time.time()
         outputs = model(**inputs)
 

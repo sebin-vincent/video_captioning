@@ -1165,8 +1165,26 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         if mask_token_id is None: mask_token_id = self.config.mask_token_id
         if bos_token_id is None: bos_token_id = self.config.bos_token_id
         if pad_token_id is None: pad_token_id = self.config.pad_token_id
-        if eos_token_ids is None: eos_token_ids = self.config.eos_token_id
-        if isinstance(eos_token_ids, int): eos_token_ids = [eos_token_ids]
+
+        # Refined EOS token handling
+        if eos_token_ids is None:
+            if hasattr(self.config, 'eos_token_id') and self.config.eos_token_id is not None:
+                eos_token_ids = [self.config.eos_token_id]
+            elif hasattr(self.config, 'sep_token_id') and self.config.sep_token_id is not None:
+                logger.warning("eos_token_id not found in config, using sep_token_id as EOS.")
+                eos_token_ids = [self.config.sep_token_id]
+            else:
+                raise ValueError(
+                    "Cannot determine EOS token ID for generation. "
+                    "Please ensure config.eos_token_id or config.sep_token_id is set."
+                )
+        elif isinstance(eos_token_ids, int):
+            eos_token_ids = [eos_token_ids]
+        # Ensure eos_token_ids is not None and is a list by this point. Fallback if somehow still None.
+        if eos_token_ids is None:
+             logger.error("eos_token_ids is None even after attempting to set it. This should not happen.")
+             eos_token_ids = [] # Prevent downstream errors, though generation will likely fail.
+
 
         self.mask_token_id = mask_token_id # Used by prepare_inputs_for_generation
         self.prev_encoded_layers = None # Used by prepare_inputs_for_generation if adapting BERT's exact logic
@@ -1343,8 +1361,21 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             # Then we take the hidden state of that token.
             next_token_hidden_states = sequence_output[:, 0, :]
 
-
+        logger.debug(f"_decode_step: next_token_hidden_states shape: {next_token_hidden_states.shape}")
         logits = self.cls(next_token_hidden_states) # self.cls is RobertaCaptioningHeads
+
+        if logger.isEnabledFor(logging.DEBUG) and logits.numel() > 0:
+            try:
+                top_k_logits, top_k_ids = torch.topk(logits, k=min(5, logits.size(-1)), dim=-1)
+                for i in range(top_k_ids.size(0)): # Iterate over batch items
+                    # Log only for the first item in batch to avoid excessive logging if batch_size > 1 for some reason in _decode_step
+                    if i == 0:
+                        logger.debug(f"_decode_step: Batch item {i} - Top 5 predicted token IDs: {top_k_ids[i].tolist()}, Logits: {top_k_logits[i].tolist()}")
+                    else:
+                        break # Only log for the first batch item
+            except Exception as e:
+                logger.debug(f"_decode_step: Error during top_k logging: {e}")
+
         return logits, new_past_key_values
 
 
@@ -1848,6 +1879,11 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
         done = [False for _ in range(batch_size)]
 
         while cur_len < max_length:
+            logger.debug(f"_generate_no_beam_search: Step cur_len={cur_len}, max_length={max_length}")
+            if logger.isEnabledFor(logging.DEBUG):
+                # Log only for the first item in batch to avoid excessive logging
+                logger.debug(f"_generate_no_beam_search: curr_ids (first batch item): {curr_ids[0].tolist()}")
+
             model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past)
             # outputs from roberta: (sequence_output, pooled_output, past_key_values, attentions)
             # sequence_output has shape (batch_size, model_input_seq_len, hidden_size)
@@ -1901,6 +1937,10 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             # next_tokens needs to be shaped as (batch_size, 1) for gather
             chosen_token_logprobs = torch.gather(next_token_logprobs_all_vocab, 1, next_tokens.unsqueeze(-1)).squeeze(-1) # (batch_size,)
 
+            if logger.isEnabledFor(logging.DEBUG):
+                # Log only for the first item in batch
+                logger.debug(f"_generate_no_beam_search: Chosen next_token (first batch item): {next_tokens[0].item()}")
+
             # update generated hypotheses and sum_logprobs
             for i in range(batch_size):
                 if done[i]:
@@ -1909,7 +1949,10 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
                 generated_lengths[i] += 1
                 sum_logprobs[i] += chosen_token_logprobs[i] # Add logprob of the chosen token
 
-                if next_tokens[i].item() in eos_token_ids:
+                is_eos = next_tokens[i].item() in eos_token_ids
+                if i == 0: # Log only for the first batch item
+                    logger.debug(f"_generate_no_beam_search: Token {next_tokens[i].item()} is EOS: {is_eos}")
+                if is_eos:
                     done[i] = True
 
             # update current token sequences
@@ -2018,6 +2061,12 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             pad_token_id = 0 # A common default if not specified
 
         while cur_len < max_length:
+            logger.debug(f"_generate_beam_search: Step cur_len={cur_len}, max_length={max_length}")
+            if logger.isEnabledFor(logging.DEBUG):
+                 # Log only for the first beam of the first batch item to avoid excessive logging
+                if curr_ids.numel() > 0:
+                    logger.debug(f"_generate_beam_search: curr_ids (first batch item, first beam): {curr_ids[0].tolist()}")
+
             model_inputs = self.prepare_inputs_for_generation(curr_ids, past=past)
             # outputs from roberta: (sequence_output, pooled_output, past_key_values, attentions)
             # sequence_output has shape (batch_size * num_beams, model_input_seq_len, hidden_size)
@@ -2071,6 +2120,14 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
             next_beam_origin_beam_idx = next_beam_indices // vocab_size # Which original beam this candidate came from
             next_beam_token_idx = next_beam_indices % vocab_size       # Which token in vocab this candidate is
 
+            if logger.isEnabledFor(logging.DEBUG):
+                # Log top candidate tokens for the first batch item
+                if next_beam_token_idx.numel() > 0 and batch_size > 0 :
+                    logger.debug(f"_generate_beam_search: Top candidate token IDs for expansion (batch item 0, up to {num_candidates_to_consider} candidates): {next_beam_token_idx[0].tolist()}")
+                    logger.debug(f"_generate_beam_search: Their original beam indices (batch item 0): {next_beam_origin_beam_idx[0].tolist()}")
+                    logger.debug(f"_generate_beam_search: Their scores (batch item 0): {next_beam_scores[0].tolist()}")
+
+
             # Prepare inputs for the next iteration
             new_beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device) - 1e9
             new_beam_curr_ids = torch.zeros((batch_size * num_beams, max_length), dtype=torch.long, device=input_ids.device) -1 # Pad with -1
@@ -2100,7 +2157,11 @@ class RobertaForImageCaptioning(RobertaPreTrainedModel):
                     global_origin_beam_idx = batch_idx * num_beams + origin_beam_idx
                     original_sequence = curr_ids[global_origin_beam_idx, :cur_len]
 
-                    if token_id in eos_token_ids: # End Of Sentence
+                    is_eos = token_id in eos_token_ids
+                    if batch_idx == 0 and logger.isEnabledFor(logging.DEBUG): # Log for first batch item
+                        logger.debug(f"_generate_beam_search: Batch 0, Beam Add: token_id={token_id}, score={score:.4f}, is_eos={is_eos}, from_beam={origin_beam_idx}, seq_len_before_add={original_sequence.size(0)}")
+
+                    if is_eos: # End Of Sentence
                         generated_hyps[batch_idx].add(original_sequence.clone(), score)
                     else: # Add to current hypothesis
                         new_sequence = torch.cat([original_sequence, torch.tensor([token_id], device=input_ids.device)])
