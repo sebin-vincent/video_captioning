@@ -547,8 +547,6 @@ def get_custom_args(base_config):
     parser.add_argument('--test_video_fname', type=str, default='None')
     parser.add_argument('--text_encoder_type', type=str, default='bert', choices=['bert', 'roberta'], help="Type of text encoder to use (bert or roberta)")
     # Add new arguments for generation parameter control
-    parser.add_argument('--repetition_penalty', type=float, default=1.2, help="Repetition penalty for generation.")
-    parser.add_argument('--no_repeat_ngram_size', type=int, default=2, help="If set to int > 0, all ngrams of that size can only occur once.")
     args = base_config.parse_args()
     return args
 
