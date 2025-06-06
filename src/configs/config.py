@@ -258,9 +258,11 @@ class SharedConfigs(object):
                                  help="filter distribution for sampling")
         self.parser.add_argument('--top_p', type=float, default=1,
                                  help="filter distribution for sampling")
-        self.parser.add_argument('--repetition_penalty', type=int, default=1,
+        self.parser.add_argument('--repetition_penalty', type=float, default=1.2,
                                  help="repetition penalty from CTRL paper "
                                  "(https://arxiv.org/abs/1909.05858)")
+        self.parser.add_argument('--no_repeat_ngram_size', type=int, default=2,
+                                 help="If set to int > 0, all ngrams of that size can only occur once.")
         self.parser.add_argument('--length_penalty', type=int, default=1,
                                  help="beam search length penalty")
         
