@@ -41,8 +41,10 @@ class VideoTransformer(torch.nn.Module):
         vid_feats = self.fc(vid_feats)
         # prepare VL transformer inputs
         kwargs['img_feats'] = vid_feats
-        if self.trans_encoder.bert.encoder.output_attentions:
-            self.trans_encoder.bert.encoder.set_output_attentions(False)
+        # If output_attentions is True in the config, we want it to stay True.
+        # The following lines would turn it off after the first call, which is not desired if we always want attentions.
+        # if self.trans_encoder.bert.encoder.output_attentions:
+        #     self.trans_encoder.bert.encoder.set_output_attentions(False)
         # learn soft attention mask
         if self.learn_mask_enabled:
             kwargs['attention_mask'] = kwargs['attention_mask'].float()

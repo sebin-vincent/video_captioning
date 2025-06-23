@@ -29,6 +29,53 @@ from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
 
+# Helper function to save attentions
+def save_attentions_to_pt(video_id, caption_ids, attentions_list, output_dir):
+    if attentions_list is None or len(attentions_list) == 0:
+        logger.info(f"No attentions to save for {video_id}.")
+        return
+
+    safe_video_id = "".join(c if c.isalnum() else "_" for c in str(video_id))
+
+    if not os.path.exists(output_dir): # Should be created in main, but double check
+        os.makedirs(output_dir, exist_ok=True)
+
+    processed_attentions_for_saving = []
+    # attentions_list is expected to be a list (per token) of tuples (per layer) of tensors
+    for token_step_attentions_tuple in attentions_list:
+        layer_attentions_list_np = []
+        if isinstance(token_step_attentions_tuple, tuple):
+            for layer_idx, layer_attention_tensor in enumerate(token_step_attentions_tuple):
+                if torch.is_tensor(layer_attention_tensor):
+                    # Expected shape: (batch=1, num_heads, seq_len, seq_len) for prod modes
+                    # Or (num_heads, seq_len, seq_len) if already squeezed
+                    current_tensor_processed = None
+                    if layer_attention_tensor.ndim == 4 and layer_attention_tensor.shape[0] == 1:
+                        current_tensor_processed = layer_attention_tensor.squeeze(0).cpu().numpy()
+                    elif layer_attention_tensor.ndim == 3: # If already squeezed or only 1 head and batch squeezed
+                         current_tensor_processed = layer_attention_tensor.cpu().numpy()
+                    else:
+                        logger.warning(f"Unexpected tensor shape for layer {layer_idx} in token attentions for {video_id}: {layer_attention_tensor.shape}")
+                    if current_tensor_processed is not None:
+                        layer_attentions_list_np.append(current_tensor_processed)
+                else:
+                    logger.warning(f"Layer {layer_idx} attention is not a tensor for {video_id}. Type: {type(layer_attention_tensor)}")
+        else:
+            logger.warning(f"Token attentions for {video_id} is not a tuple/list of layer attentions. Type: {type(token_step_attentions_tuple)}")
+        processed_attentions_for_saving.append(layer_attentions_list_np)
+
+    output_path = os.path.join(output_dir, f"{safe_video_id}_attentions.pt")
+
+    try:
+        torch.save({
+            'video_id': video_id,
+            'caption_ids': caption_ids.cpu().numpy() if torch.is_tensor(caption_ids) else caption_ids,
+            'attentions_per_token_per_layer': processed_attentions_for_saving
+        }, output_path)
+        logger.info(f"Saved attentions for {video_id} to {output_path}")
+    except Exception as e:
+        logger.error(f"Error saving attentions for {video_id}: {e}", exc_info=True)
+
 def _online_video_decode(args, video_path):
     decoder_num_frames = getattr(args, 'max_num_frames', 2)
     frames, _ = extract_frames_from_video_path(
@@ -97,16 +144,73 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         }
         tic = time.time()
         outputs = model(**inputs)
-
         time_meter = time.time() - tic
-        all_caps = outputs[0]  # batch_size * num_keep_best * max_len
-        all_confs = torch.exp(outputs[1])
 
-        for caps, confs in zip(all_caps, all_confs):
-            for cap, conf in zip(caps, confs):
-                cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
-                logger.info(f"Prediction: {cap}")
-                logger.info(f"Conf: {conf.item()}")
+        all_caps = outputs[0]  # batch_size * num_keep_best * max_len
+        all_confs = torch.exp(outputs[1]) # Assuming logprobs are the second element
+
+        all_step_attentions = None
+        if args.output_attentions_for_visualization:
+            # This part is highly dependent on BertForImageCaptioning.generate or prod_generate returning attentions
+            # For prod_generate (if it were called), it returns (ids, logprob, attentions_list)
+            # VideoTransformer might add a sparsity_loss.
+            # If learn_mask_enabled (in VideoTransformer's args, which is train_args):
+            #   If prod_mode, output can be (ids, logprob, att_list, sparsity_loss) -> len 4
+            # Else (not learn_mask_enabled):
+            #   If prod_mode, output can be (ids, logprob, att_list) -> len 3
+            # The current script does not use 'inference_mode' to call prod_generate.
+            # It calls the generic 'generate' which currently doesn't return attentions.
+            # So, this block is mostly for future-proofing or if prod_generate is used.
+
+            # Check if current args (train_args from loaded model) has learn_mask_enabled
+            learn_mask_was_enabled = getattr(args, 'learn_mask_enabled', False)
+
+            if learn_mask_was_enabled:
+                if len(outputs) == 4: # Expected: (ids, logprobs, attentions, sparsity_loss)
+                    all_step_attentions = outputs[2]
+                    logger.info_once("Extracted attentions assuming (ids, logprobs, attentions, sparsity_loss) output structure.")
+                elif len(outputs) == 3: # (ids, logprobs, attentions) if sparsity_loss wasn't added by VideoTransformer for some reason
+                    all_step_attentions = outputs[2]
+                    logger.warning("learn_mask_enabled=True, but model output had 3 elements. Assuming attentions are the 3rd.")
+                else:
+                    logger.info_once(f"output_attentions_for_visualization is True, learn_mask_enabled=True, but model output length is {len(outputs)}. Expected 4 (with attentions).")
+            else: # learn_mask_enabled is False
+                if len(outputs) == 3: # Expected: (ids, logprobs, attentions)
+                    all_step_attentions = outputs[2]
+                    logger.info_once("Extracted attentions assuming (ids, logprobs, attentions) output structure.")
+                else:
+                    logger.info_once(f"output_attentions_for_visualization is True, learn_mask_enabled=False, but model output length is {len(outputs)}. Expected 3 (with attentions).")
+
+            if all_step_attentions is None:
+                 logger.info_once("Attentions not found in model output, though requested. BertForImageCaptioning.generate might need update for non-prod modes.")
+
+        # The script processes all_caps assuming it might be a batch or multiple return sequences.
+        # If batch_size for inference is 1, and num_return_sequences = 1:
+        # all_caps[0] is (1, max_len), all_confs[0] is (1,)
+        # caps in loop is (max_len), conf is scalar
+        # We save attentions for the first returned sequence of the first item in batch (if batch_size=1).
+        # This matches prod_generate's behavior (batch_size=1).
+
+        saved_attentions_for_this_video = False
+        for i, (caps_per_item, confs_per_item) in enumerate(zip(all_caps, all_confs)):
+            if i == 0: # Only process first item in batch for attentions for now
+                for j, (cap_ids, conf) in enumerate(zip(caps_per_item, confs_per_item)):
+                    if j == 0: # Only process first returned sequence for attentions
+                        cap_text = tokenizer.decode(cap_ids.tolist(), skip_special_tokens=True)
+                        logger.info(f"Prediction: {cap_text} (Conf: {conf.item()})")
+                        if args.output_attentions_for_visualization and all_step_attentions is not None and args.attentions_output_dir and not saved_attentions_for_this_video:
+                            video_id_for_filename = os.path.splitext(os.path.basename(video_path))[0]
+                            # Pass all_step_attentions directly, as it's for the single sample from prod_mode or first sample.
+                            save_attentions_to_pt(video_id_for_filename, cap_ids, all_step_attentions, args.attentions_output_dir)
+                            saved_attentions_for_this_video = True
+                    else: # Other returned sequences for the first item
+                        cap_text = tokenizer.decode(cap_ids.tolist(), skip_special_tokens=True)
+                        logger.info(f"Other Prediction: {cap_text} (Conf: {conf.item()})")
+            else: # Other items in batch
+                 for caps_ids_other, confs_other in zip(caps_per_item, confs_per_item): # Iterate through their return sequences
+                    cap_text = tokenizer.decode(caps_ids_other.tolist(), skip_special_tokens=True)
+                    logger.info(f"Batch Prediction (Item {i+1}): {cap_text} (Conf: {confs_other.item()})")
+
 
     logger.info(f"Inference model computing time: {time_meter} seconds")
 
@@ -177,6 +281,8 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument("--output_attentions_for_visualization", action='store_true',
+                        help="Enable output of attention probabilities for visualization.")
     args = base_config.parse_args()
     return args
 
@@ -221,6 +327,29 @@ def main(args):
 
     vl_transformer.to(args.device)
     vl_transformer.eval()
+
+    if args.output_attentions_for_visualization:
+        logger.info("Enabling output_attentions for visualization.")
+        if hasattr(vl_transformer, 'trans_encoder') and \
+           hasattr(vl_transformer.trans_encoder, 'bert') and \
+           hasattr(vl_transformer.trans_encoder.bert, 'config'):
+            vl_transformer.trans_encoder.bert.config.output_attentions = True
+            if hasattr(vl_transformer.trans_encoder.bert, 'encoder'):
+                vl_transformer.trans_encoder.bert.encoder.set_output_attentions(True)
+                # Also set on individual layers for safety, though set_output_attentions should handle it
+                for layer in vl_transformer.trans_encoder.bert.encoder.layer:
+                    layer.attention.self.output_attentions = True
+            else:
+                logger.warning("Could not set output_attentions on bert.encoder: not found.")
+        else:
+            logger.warning("Could not set output_attentions on model: structure not as expected.")
+
+        args.attentions_output_dir = os.path.join(args.output_dir, "attentions_viz")
+        if not os.path.exists(args.attentions_output_dir) and is_main_process():
+            os.makedirs(args.attentions_output_dir, exist_ok=True)
+            logger.info(f"Attention visualizations will be saved to: {args.attentions_output_dir}")
+    else:
+        args.attentions_output_dir = None
 
     tensorizer = build_tensorizer(args, tokenizer, is_train=False)
     inference(args, args.test_video_fname, vl_transformer, tokenizer, tensorizer)

@@ -2057,8 +2057,20 @@ class BertForImageCaptioning(BertPreTrainedModel):
             'encoder_history_states': encoder_history_states}
         cur_len = cur_ids.shape[1]
         sum_logprob = 0
+        all_step_attentions = []
         while True:
-            outputs = self(**model_inputs)
+            outputs = self(**model_inputs) # This calls encode_forward with is_training=False
+            if self.config.output_attentions:
+                # encode_forward returns (class_logits,) + bert_outputs[2:]
+                # bert_outputs[2:] is (attentions,) if no hidden_states, or (hidden_states, attentions) if hidden_states
+                if self.config.output_hidden_states:
+                    # Full model output is (class_logits, hidden_states, attentions)
+                    if len(outputs) >= 3:
+                        all_step_attentions.append(outputs[2])
+                else:
+                    # Full model output is (class_logits, attentions)
+                    if len(outputs) >= 2:
+                        all_step_attentions.append(outputs[1])
 
             assert self._do_output_past(outputs)
             if cur_len == 1:
@@ -2117,7 +2129,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
         logprob = sum_logprob / cur_ids.shape[1]
 
         # (batch_size, max_len), (batch_size)
-        return cur_ids, torch.full((1,), logprob, device=device)
+        return cur_ids, torch.full((1,), logprob, device=device), all_step_attentions
 
     def prod_no_hidden_generate(self, img_feats, od_label_ids, max_length,
             bos_token_id, eos_token_ids, mask_token_id, od_labels_start_posid,
@@ -2185,8 +2197,20 @@ class BertForImageCaptioning(BertPreTrainedModel):
             }
         cur_len = cur_ids.shape[1]
         sum_logprob = 0
+        all_step_attentions = []
         while True:
-            outputs = self(**model_inputs)
+            outputs = self(**model_inputs) # This calls encode_forward with is_training=False
+            if self.config.output_attentions:
+                # encode_forward returns (class_logits,) + bert_outputs[2:]
+                # bert_outputs[2:] is (attentions,) if no hidden_states, or (hidden_states, attentions) if hidden_states
+                if self.config.output_hidden_states:
+                    # Full model output is (class_logits, hidden_states, attentions)
+                    if len(outputs) >= 3:
+                        all_step_attentions.append(outputs[2])
+                else:
+                    # Full model output is (class_logits, attentions)
+                    if len(outputs) >= 2:
+                        all_step_attentions.append(outputs[1])
 
             assert not self._do_output_past(outputs)
 
@@ -2219,7 +2243,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
         logprob = sum_logprob / cur_ids.shape[1]
 
         # (batch_size, max_len), (batch_size)
-        return cur_ids, torch.full((1,), logprob, device=device)
+        return cur_ids, torch.full((1,), logprob, device=device), all_step_attentions
 
 @add_start_docstrings("""Bert Model with a multiple choice classification head on top (a linear layer on top of
     the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
