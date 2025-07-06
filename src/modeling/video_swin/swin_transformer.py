@@ -169,6 +169,10 @@ class WindowAttention3D(nn.Module):
         Args:
             x: input features with shape of (num_windows*B, N, C)
             mask: (0/-inf) mask with shape of (num_windows, N, N) or None
+        Returns:
+            Tuple of (output_features, attention_scores)
+            - output_features: tensor of shape (num_windows*B, N, C)
+            - attention_scores: tensor of shape (num_windows*B, num_heads, N, N)
         """
         B_, N, C = x.shape
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
@@ -195,7 +199,7 @@ class WindowAttention3D(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        return x, attn # Return attention scores as well
 
 
 class SwinTransformerBlock3D(nn.Module):
@@ -263,10 +267,10 @@ class SwinTransformerBlock3D(nn.Module):
         # partition windows
         x_windows = window_partition(shifted_x, window_size)  # B*nW, Wd*Wh*Ww, C
         # W-MSA/SW-MSA
-        attn_windows = self.attn(x_windows, mask=attn_mask)  # B*nW, Wd*Wh*Ww, C
+        attn_windows_output, attn_weights = self.attn(x_windows, mask=attn_mask)  # B*nW, Wd*Wh*Ww, C and # B*nW, nH, N, N
         # merge windows
-        attn_windows = attn_windows.view(-1, *(window_size+(C,)))
-        shifted_x = window_reverse(attn_windows, window_size, B, Dp, Hp, Wp)  # B D' H' W' C
+        attn_windows_output = attn_windows_output.view(-1, *(window_size+(C,)))
+        shifted_x = window_reverse(attn_windows_output, window_size, B, Dp, Hp, Wp)  # B D' H' W' C
         # reverse cyclic shift
         if any(i > 0 for i in shift_size):
             x = torch.roll(shifted_x, shifts=(shift_size[0], shift_size[1], shift_size[2]), dims=(1, 2, 3))
@@ -275,7 +279,7 @@ class SwinTransformerBlock3D(nn.Module):
 
         if pad_d1 >0 or pad_r > 0 or pad_b > 0:
             x = x[:, :D, :H, :W, :].contiguous()
-        return x
+        return x, attn_weights
 
     def forward_part2(self, x):
         return self.drop_path(self.mlp(self.norm2(x)))
@@ -286,13 +290,23 @@ class SwinTransformerBlock3D(nn.Module):
         Args:
             x: Input feature, tensor size (B, D, H, W, C).
             mask_matrix: Attention mask for cyclic shift.
+        Returns:
+            Tuple of (output_features, attention_scores)
+            - output_features: tensor of shape (B, D, H, W, C)
+            - attention_scores: tensor of shape (B*num_windows, num_heads, N, N) from the attention block.
+                                None if use_checkpoint is True, due to checkpoint wrapper limitations.
         """
 
+        attn_weights = None
         shortcut = x
         if self.use_checkpoint:
+            # checkpoint.checkpoint does not support multiple return values for non-tensor types yet
+            # Thus, we cannot get attn_weights if use_checkpoint is True.
+            # For simplicity, we'll proceed, acknowledging this limitation.
+            # If attentions are critical with checkpointing, this part would need a workaround.
             x = checkpoint.checkpoint(self.forward_part1, x, mask_matrix)
         else:
-            x = self.forward_part1(x, mask_matrix)
+            x, attn_weights = self.forward_part1(x, mask_matrix)
         x = shortcut + self.drop_path(x)
 
         if self.use_checkpoint:
@@ -300,7 +314,7 @@ class SwinTransformerBlock3D(nn.Module):
         else:
             x = x + self.forward_part2(x)
 
-        return x
+        return x, attn_weights
 
 
 class PatchMerging(nn.Module):
@@ -423,6 +437,11 @@ class BasicLayer(nn.Module):
 
         Args:
             x: Input feature, tensor size (B, C, D, H, W).
+        Returns:
+            Tuple of (output_features, layer_attentions)
+            - output_features: tensor of shape (B, C, D, H, W)
+            - layer_attentions: list of attention_scores from each block in this layer.
+                                Each element is (B*num_windows, num_heads, N, N) or None.
         """
         # calculate attention mask for SW-MSA
         B, C, D, H, W = x.shape
@@ -432,16 +451,21 @@ class BasicLayer(nn.Module):
         Hp = int(np.ceil(H / window_size[1])) * window_size[1]
         Wp = int(np.ceil(W / window_size[2])) * window_size[2]
         attn_mask = compute_mask(Dp, Hp, Wp, window_size, shift_size, x.device)
+
+        layer_attentions = []
         for blk in self.blocks:
             # safeguard fp16
             attn_mask = attn_mask.to(dtype=x.dtype)
-            x = blk(x, attn_mask)
+            x, block_attn_weights = blk(x, attn_mask)
+            if block_attn_weights is not None: # Will be None if checkpointing is used in SwinTransformerBlock3D
+                layer_attentions.append(block_attn_weights)
+
         x = x.view(B, D, H, W, -1)
 
         if self.downsample is not None:
             x = self.downsample(x)
         x = rearrange(x, 'b d h w c -> b c d h w')
-        return x
+        return x, layer_attentions
 
 
 class PatchEmbed3D(nn.Module):
@@ -679,19 +703,30 @@ class SwinTransformer3D(nn.Module):
             raise TypeError('pretrained must be a str or None')
 
     def forward(self, x):
-        """Forward function."""
+        """
+        Forward function.
+        Args:
+            x: Input tensor of shape (B, C, D, H, W).
+        Returns:
+            Tuple of (output_features, all_swin_attentions)
+            - output_features: tensor of shape (B, C_out, D_out, H_out, W_out)
+            - all_swin_attentions: list (per main layer) of lists (per block) of attention scores.
+                                   Each score tensor is (B*num_windows, num_heads, N, N) or None.
+        """
         x = self.patch_embed(x)
 
         x = self.pos_drop(x)
 
+        all_swin_attentions = []
         for layer in self.layers:
-            x = layer(x.contiguous())
+            x, layer_attentions = layer(x.contiguous())
+            all_swin_attentions.append(layer_attentions)
 
         x = rearrange(x, 'n c d h w -> n d h w c')
         x = self.norm(x)
         x = rearrange(x, 'n d h w c -> n c d h w')
 
-        return x
+        return x, all_swin_attentions
 
     def train(self, mode=True):
         """Convert the model into training mode while keep layers freezed."""

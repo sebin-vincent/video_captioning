@@ -17,6 +17,7 @@ def get_bert_model(args):
     config.label_smoothing = args.label_smoothing
     config.drop_worst_ratio = args.drop_worst_ratio
     config.drop_worst_after = args.drop_worst_after
+    config.output_attentions = True # Enable attention outputs for explainability features
     # update model structure if specified in arguments
     update_params = ['img_feature_dim', 'num_hidden_layers', 'hidden_size', 'num_attention_heads', 'intermediate_size']
     model_structure_changed = [False] * len(update_params)

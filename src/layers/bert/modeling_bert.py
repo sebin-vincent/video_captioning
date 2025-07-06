@@ -1722,11 +1722,24 @@ class BertForImageCaptioning(BertPreTrainedModel):
                 img_feat = self.cls_img_feat(sequence_output_masked_img)
                 masked_loss_img = self.loss_img_feat(img_feat.float(), masked_token_img)
                 masked_loss += 0.1 * masked_loss_img  # TODO
-            outputs = (masked_loss, class_logits,) + outputs[2:]
+
+            # outputs from self.bert are (sequence_output, pooled_output, optional_hidden_states, optional_attentions)
+            # We want to return (masked_loss, class_logits, optional_hidden_states, optional_attentions)
+            # The *bert_extra_outputs (hidden_states, attentions) are preserved by slicing outputs[2:].
+            returned_outputs = (masked_loss, class_logits,)
+            if len(outputs) > 2: # it means hidden_states and/or attentions are present
+                returned_outputs += outputs[2:]
+            outputs = returned_outputs
         else:
             sequence_output = outputs[0][:, :input_ids.shape[-1], :]
             class_logits = self.cls(sequence_output)
-            outputs = (class_logits,) + outputs[2:]
+            # outputs from self.bert are (sequence_output, pooled_output, optional_hidden_states, optional_attentions)
+            # We want to return (class_logits, optional_hidden_states, optional_attentions)
+            # The *bert_extra_outputs (hidden_states, attentions) are preserved by slicing outputs[2:].
+            returned_outputs = (class_logits,)
+            if len(outputs) > 2: # it means hidden_states and/or attentions are present
+                returned_outputs += outputs[2:]
+            outputs = returned_outputs
         return outputs
 
     def prepare_inputs_for_generation(self, curr_ids, past=None):

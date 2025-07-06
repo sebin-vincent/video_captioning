@@ -28,6 +28,13 @@ from src.utils.miscellaneous import (mkdir, set_seed, str_to_bool)
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+# Imports for explainability
+from src.explainability.attention_mapper import get_bert_text_to_visual_attention, generate_token_visual_explanations # get_swin_patch_importance_scores (not used yet)
+from src.explainability.visualization import visualize_token_explanation
+
+
+# Global flag for mode, can be turned into an arg later
+EXTRACT_ATTENTIONS_MODE = True # Set to True to run attention extraction, False for normal inference.
 
 def _online_video_decode(args, video_path):
     decoder_num_frames = getattr(args, 'max_num_frames', 2)
@@ -67,48 +74,180 @@ def inference(args, video_path, model, tokenizer, tensorizer):
 
     model.float()
     model.eval()
-    frames = _online_video_decode(args, video_path)
-    preproc_frames = _transforms(args, frames)
+    frames_raw_dec = _online_video_decode(args, video_path) # Renamed to avoid clash if used later
+    preproc_frames = _transforms(args, frames_raw_dec)
+    # data_sample is (input_ids, attention_mask, token_type_ids, img_feats_TCHW, masked_pos, lm_label_ids)
     data_sample = tensorizer.tensorize_example_e2e('', preproc_frames)
     data_sample = tuple(t.to(args.device) for t in data_sample)
+
+    # img_feats for model input needs to be (B, S, C, H, W) as in VideoTransformer init
+    # but tensorizer.tensorize_example_e2e returns img_feats as (T,C,H,W)
+    # VideoTransformer expects 'img_feats' in kwargs as (B,S,C,H,W)
+    # The data_sample[3] is (T,C,H,W). Need to unsqueeze to (1,T,C,H,W)
+    # S in VideoTransformer is number of segments, which is T (num_frames) here.
+
+    img_feats_for_model = data_sample[3].unsqueeze(0) # Becomes (1, T, C, H, W)
+
     with torch.no_grad():
+        if EXTRACT_ATTENTIONS_MODE:
+            logger.info("Running in attention extraction mode.")
+            # Prepare inputs for a single forward pass (is_decode=False)
+            inputs = {
+                'is_decode': False,
+                'input_ids': data_sample[0].unsqueeze(0), # Add batch dim
+                'attention_mask': data_sample[1].unsqueeze(0), # Add batch dim
+                'token_type_ids': data_sample[2].unsqueeze(0), # Add batch dim
+                'img_feats': img_feats_for_model, # Already (1, T, C, H, W)
+                'masked_pos': data_sample[4].unsqueeze(0), # Add batch dim
+                'masked_ids': data_sample[5].unsqueeze(0)  # Add batch dim
+            }
 
-        inputs = {'is_decode': True,
-            'input_ids': data_sample[0][None,:], 'attention_mask': data_sample[1][None,:],
-            'token_type_ids': data_sample[2][None,:], 'img_feats': data_sample[3][None,:],
-            'masked_pos': data_sample[4][None,:],
-            'do_sample': False,
-            'bos_token_id': cls_token_id,
-            'pad_token_id': pad_token_id,
-            'eos_token_ids': [sep_token_id],
-            'mask_token_id': mask_token_id,
-            # for adding od labels
-            'add_od_labels': args.add_od_labels, 'od_labels_start_posid': args.max_seq_a_length,
-            # hyperparameters of beam search
-            'max_length': args.max_gen_length,
-            'num_beams': args.num_beams,
-            "temperature": args.temperature,
-            "top_k": args.top_k,
-            "top_p": args.top_p,
-            "repetition_penalty": args.repetition_penalty,
-            "length_penalty": args.length_penalty,
-            "num_return_sequences": args.num_return_sequences,
-            "num_keep_best": args.num_keep_best,
-        }
-        tic = time.time()
-        outputs = model(**inputs)
+            outputs = model(**inputs)
+            # Expected outputs from VideoTransformer.forward (when is_decode=False):
+            # Tuple containing:
+            # 1. masked_loss (if training) or logits (if eval and not training)
+            # 2. class_logits (if training) or potentially nothing if eval (depends on BertForImageCaptioning.encode_forward)
+            # Followed by:
+            # ?. (optional) bert_hidden_states
+            # ?. (optional) bert_attentions
+            # ?. (optional) sparsity_loss (if learn_mask_enabled)
+            # LAST. swin_attentions
+            # The exact indexing requires care based on the model's configuration.
 
-        time_meter = time.time() - tic
-        all_caps = outputs[0]  # batch_size * num_keep_best * max_len
-        all_confs = torch.exp(outputs[1])
+            bert_attentions = None
+            swin_attentions = None
+            bert_config = model.trans_encoder.bert.config # BertConfig
 
-        for caps, confs in zip(all_caps, all_confs):
-            for cap, conf in zip(caps, confs):
-                cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
-                logger.info(f"Prediction: {cap}")
-                logger.info(f"Conf: {conf.item()}")
+            # Base elements: loss, logits
+            current_idx = 2
+            if bert_config.output_hidden_states:
+                # bert_hidden_states = outputs[current_idx]
+                current_idx +=1
 
-    logger.info(f"Inference model computing time: {time_meter} seconds")
+            if bert_config.output_attentions:
+                bert_attentions = outputs[current_idx]
+                current_idx +=1
+
+            # Check for sparsity loss if learn_mask_enabled
+            # model.learn_mask_enabled is not directly accessible here, check args used for model creation
+            # The VideoTransformer instance is 'model' here.
+            if hasattr(model, 'learn_mask_enabled') and model.learn_mask_enabled:
+                # sparsity_loss = outputs[current_idx]
+                current_idx += 1
+
+            swin_attentions = outputs[current_idx] if len(outputs) > current_idx else None
+
+            logger.info(f"Raw BERT attentions extracted: {'Yes' if bert_attentions is not None else 'No'}")
+            if bert_attentions:
+                logger.info(f"  Num layers: {len(bert_attentions)}")
+                logger.info(f"  Shape of last layer attentions: {bert_attentions[-1].shape}")
+
+            logger.info(f"Raw Swin attentions extracted: {'Yes' if swin_attentions is not None else 'No'}")
+            if swin_attentions:
+                logger.info(f"  Num Swin major layers: {len(swin_attentions)}")
+                if swin_attentions[0] and isinstance(swin_attentions[0], list) and swin_attentions[0][0] is not None:
+                     logger.info(f"  Shape of first block, first layer: {swin_attentions[0][0].shape}")
+
+            # Decode input_ids to get text tokens for explanation
+            # input_ids for BERT part already includes [CLS], [SEP]
+            # For `get_bert_text_to_visual_attention`, text_len should be this full length.
+            # For `generate_token_visual_explanations`, `text_tokens` should be human-readable.
+
+            input_ids_list = inputs['input_ids'][0].tolist()
+            processed_tokens_for_bert_att = tokenizer.convert_ids_to_tokens(input_ids_list)
+            # For user display, filter out special tokens from the text part
+            display_text_tokens = [t for t in processed_tokens_for_bert_att if t not in {tokenizer.cls_token, tokenizer.sep_token, tokenizer.pad_token}]
+
+
+            num_visual_tokens_bert = args.max_img_seq_length
+
+            bert_text_to_vis_scores = get_bert_text_to_visual_attention(
+                bert_attentions,
+                text_len=inputs['input_ids'].shape[1], # Full length of tokens fed to BERT text part
+                visual_len=num_visual_tokens_bert,
+                batch_idx=0
+            )
+
+            # Swin temporal patch embed stride is typically 2 (e.g. patch_size[0]=2 for VideoSwin)
+            # Swin spatial patch embed stride is typically 4 (e.g. patch_size[1]=4, patch_size[2]=4 for VideoSwin)
+            # Final feature grid spatial resolution for BERT is (img_res/32, img_res/32)
+            # Final feature grid temporal resolution for BERT is (max_num_frames / (swin_temporal_patch_embed_stride * any_other_temporal_downsampling))
+            # From args.max_img_seq_length formula, seems like (max_num_frames/2) is the temporal dim into the spatial grid part.
+
+            swin_temporal_dim_for_bert = args.max_num_frames // getattr(args, 'swin_patch_size', [2,4,4])[0] # e.g., 32/2 = 16
+            # This swin_temporal_dim_for_bert is the D_out in D_out * (H_out/32)^2 = max_img_seq_length
+            # The (img_res/32) is already H_patches and W_patches after all Swin stages.
+
+            patches_rc_dim_per_frame = args.img_res // 32 # e.g. 224/32 = 7
+
+            explanations = generate_token_visual_explanations(
+                text_tokens=display_text_tokens, # User-friendly tokens
+                bert_text_to_visual_attention_scores=bert_text_to_vis_scores, # (text_len_bert, visual_len_bert)
+                num_frames=swin_temporal_dim_for_bert,
+                patches_per_frame_h=patches_rc_dim_per_frame,
+                patches_per_frame_w=patches_rc_dim_per_frame,
+                top_k_frames_per_token=1 # For brevity in logs
+            )
+
+            if explanations:
+                # Ensure output directory exists
+                viz_output_dir = op.join(args.output_dir, "visualizations")
+                mkdir(viz_output_dir)
+
+                for token_idx, token_exp_data in enumerate(explanations):
+                    # Sanitize token string for filename
+                    sane_token_str = "".join(c if c.isalnum() else "_" for c in token_exp_data['token_str'])
+                    if not sane_token_str: sane_token_str = f"token{token_idx}"
+
+                    output_viz_path = op.join(viz_output_dir, f"exp_tok_{sane_token_str}.mp4")
+                    vis_patch_display_size = (args.img_res // patches_rc_dim_per_frame, args.img_res // patches_rc_dim_per_frame)
+
+                    logger.info(f"Visualizing for token: {token_exp_data['token_str']}")
+                    visualize_token_explanation(
+                        video_path,
+                        token_exp_data,
+                        output_viz_path,
+                        patch_size=vis_patch_display_size
+                    )
+                    logger.info(f"Saved explanation for token '{token_exp_data['token_str']}' to {output_viz_path}")
+            else:
+                logger.info("No explanations generated.")
+
+        else: # Original inference path
+            inputs = {'is_decode': True,
+                'input_ids': data_sample[0].unsqueeze(0),
+                'attention_mask': data_sample[1].unsqueeze(0),
+                'token_type_ids': data_sample[2].unsqueeze(0),
+                'img_feats': img_feats_for_model, # Use the correctly shaped one
+                'masked_pos': data_sample[4].unsqueeze(0),
+                'do_sample': False,
+                'bos_token_id': cls_token_id,
+                'pad_token_id': pad_token_id,
+                'eos_token_ids': [sep_token_id],
+                'mask_token_id': mask_token_id,
+                'add_od_labels': args.add_od_labels, 'od_labels_start_posid': args.max_seq_a_length,
+                'max_length': args.max_gen_length,
+                'num_beams': args.num_beams,
+                "temperature": args.temperature,
+                "top_k": args.top_k,
+                "top_p": args.top_p,
+                "repetition_penalty": args.repetition_penalty,
+                "length_penalty": args.length_penalty,
+                "num_return_sequences": args.num_return_sequences,
+                "num_keep_best": args.num_keep_best,
+            }
+            tic = time.time()
+            outputs = model(**inputs) # Standard generation
+            time_meter = time.time() - tic
+            all_caps = outputs[0]
+            all_confs = torch.exp(outputs[1])
+
+            for caps, confs in zip(all_caps, all_confs):
+                for cap, conf in zip(caps, confs):
+                    cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
+                    logger.info(f"Prediction: {cap}")
+                    logger.info(f"Conf: {conf.item()}")
+            logger.info(f"Inference model computing time: {time_meter} seconds")
 
 def check_arguments(args):
     # shared basic checks
