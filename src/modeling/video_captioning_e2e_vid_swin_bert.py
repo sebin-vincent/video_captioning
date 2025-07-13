@@ -59,15 +59,17 @@ class VideoTransformer(torch.nn.Module):
                 learn_att.requires_grad = False
             kwargs['attention_mask'][:, -vid_att_len::, -vid_att_len::] = learn_att
 
-        is_decode = kwargs.get('is_decode', False)
+        # Check if in generation mode by looking for 'encoder_history_states'
+        in_generation_mode = 'encoder_history_states' in kwargs and kwargs['encoder_history_states'] is not None
 
         trans_encoder_outputs = self.trans_encoder(*args, **kwargs)
 
-        if is_decode:
-            # During decoding, return the raw outputs from the transformer encoder
+        if in_generation_mode:
+            # During generation, the 'generate' function in modeling_bert.py expects a specific output format.
+            # We should not append any extra information that might disrupt it.
             return trans_encoder_outputs
 
-        # During training/evaluation, append additional information
+        # For training or single-pass evaluation, we can append extra info.
         final_outputs = list(trans_encoder_outputs)
 
         if self.learn_mask_enabled:
