@@ -59,26 +59,29 @@ class VideoTransformer(torch.nn.Module):
                 learn_att.requires_grad = False
             kwargs['attention_mask'][:, -vid_att_len::, -vid_att_len::] = learn_att
 
-        # Check if in generation mode by looking for 'encoder_history_states'
-        in_generation_mode = 'encoder_history_states' in kwargs and kwargs['encoder_history_states'] is not None
-
         trans_encoder_outputs = self.trans_encoder(*args, **kwargs)
+        # trans_encoder_outputs from BertForImageCaptioning.encode_forward now include:
+        # (masked_loss, class_logits, *bert_extra_outputs) OR (class_logits, *bert_extra_outputs)
+        # where bert_extra_outputs can be (bert_hidden_states, bert_attentions) or (bert_attentions)
+        # if config.output_attentions=True and/or config.output_hidden_states=True.
 
-        if in_generation_mode:
-            # During generation, the 'generate' function in modeling_bert.py expects a specific output format.
-            # We should not append any extra information that might disrupt it.
-            return trans_encoder_outputs
-
-        # For training or single-pass evaluation, we can append extra info.
         final_outputs = list(trans_encoder_outputs)
 
         if self.learn_mask_enabled:
             loss_sparsity = self.get_loss_sparsity(video_attention)
-            final_outputs.append(loss_sparsity)
+            final_outputs.append(loss_sparsity) # Appends to the end of list from trans_encoder
 
+        # Append Swin attentions to the final output tuple.
+        # BERT attentions (and hidden states, if enabled) are already part of final_outputs.
         final_outputs.append(swin_attentions)
 
         return tuple(final_outputs)
+        # Return structure example (training, BERT attentions only, learn_mask=True):
+        # (masked_loss, logits, bert_attentions, sparsity_loss, swin_attentions)
+        # Return structure example (eval, BERT attentions only, learn_mask=False):
+        # (logits, bert_attentions, swin_attentions)
+        # If BERT hidden_states also True:
+        # (logits, bert_hidden_states, bert_attentions, swin_attentions)
     
     def get_loss_sparsity(self, video_attention):
         sparsity_loss = 0
