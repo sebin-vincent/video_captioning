@@ -171,7 +171,14 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
         loss, logits = outputs[:2]
 
         if args.learn_mask_enabled:
-            loss_sparsity = outputs[-1]
+            print(f"DEBUG: len(outputs) = {len(outputs)}")
+            if len(outputs) > 0: print(f"DEBUG: type(outputs[-1]) = {type(outputs[-1])}")
+            if len(outputs) > 1: print(f"DEBUG: type(outputs[-2]) = {type(outputs[-2])}")
+            if len(outputs) > 2: print(f"DEBUG: type(outputs[-3]) = {type(outputs[-3])}")
+            # The line below is the corrected one
+            loss_sparsity = outputs[-2] 
+            print(f"DEBUG: loss_sparsity value = {loss_sparsity}")
+            print(f"DEBUG: type(loss_sparsity) = {type(loss_sparsity)}")
             loss = loss + (loss_sparsity * args.loss_sparse_w)
         masked_ids = inputs['masked_ids']
         masked_ids = masked_ids[masked_ids != -1]
