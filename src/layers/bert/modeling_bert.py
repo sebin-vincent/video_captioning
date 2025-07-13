@@ -1743,16 +1743,6 @@ class BertForImageCaptioning(BertPreTrainedModel):
         return outputs
 
     def prepare_inputs_for_generation(self, curr_ids, past=None):
-        logger.info("Inside prepare_inputs_for_generation")
-        if past is not None:
-            logger.info(f"past is not None, type(past) = {type(past)}")
-            if isinstance(past, tuple) and len(past) > 0:
-                logger.info(f"type(past[0]) = {type(past[0])}")
-                if isinstance(past[0], torch.Tensor):
-                    logger.info(f"past[0].shape = {past[0].shape}")
-        else:
-            logger.info("past is None")
-
         # NOTE: if attention is on, it should be the token used to mask words in training
         mask_token_id = self.mask_token_id
         batch_size = curr_ids.shape[0]
@@ -1849,7 +1839,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
         return {'input_ids': input_ids, 'img_feats': img_feats,
             'masked_pos': masked_pos, 'attention_mask': attention_mask,
             'token_type_ids': token_type_ids, 'position_ids': position_ids,
-            'is_training': False,
+            'is_training': False, 'is_decode': True,
             'encoder_history_states': self.prev_encoded_layers}
 
     def get_output_embeddings(self):
