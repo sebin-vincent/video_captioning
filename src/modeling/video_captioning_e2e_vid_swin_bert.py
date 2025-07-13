@@ -59,16 +59,32 @@ class VideoTransformer(torch.nn.Module):
                 learn_att.requires_grad = False
             kwargs['attention_mask'][:, -vid_att_len::, -vid_att_len::] = learn_att
 
-        trans_encoder_outputs = self.trans_encoder(*args, **kwargs)
+        outputs = self.trans_encoder(*args, **kwargs)
+
+        # In inference, the fourth output item is the attention scores.
+        if not self.trans_encoder.training:
+            # outputs from BertForImageCaptioning contains loss, logits, hidden_states, attentions
+            # we need to maintain the order of the first two elements.
+            # a list of tensors, which contains sequence_output, pooled_output, (hidden_states), (attentions)
+            trans_encoder_outputs = outputs[0]
+            # In inference, the fourth output item is the attention scores.
+            bert_attentions = outputs[-1]
+            # The format of the output is different in training and inference.
+            if self.learn_mask_enabled:
+                loss_sparsity = self.get_loss_sparsity(learn_att)
+                return trans_encoder_outputs, outputs[1], loss_sparsity, bert_attentions, swin_attentions
+            else:
+                return trans_encoder_outputs, outputs[1], bert_attentions, swin_attentions
+
+        # In training, the output is a tuple of (loss, logits, hidden_states, attentions)
         # trans_encoder_outputs from BertForImageCaptioning.encode_forward now include:
         # (masked_loss, class_logits, *bert_extra_outputs) OR (class_logits, *bert_extra_outputs)
         # where bert_extra_outputs can be (bert_hidden_states, bert_attentions) or (bert_attentions)
         # if config.output_attentions=True and/or config.output_hidden_states=True.
-
-        final_outputs = list(trans_encoder_outputs)
+        final_outputs = list(outputs)
 
         if self.learn_mask_enabled:
-            loss_sparsity = self.get_loss_sparsity(video_attention)  
+            loss_sparsity = self.get_loss_sparsity(video_attention)
             final_outputs.append(loss_sparsity) # Appends to the end of list from trans_encoder
 
         # Append Swin attentions to the final output tuple.
@@ -76,12 +92,6 @@ class VideoTransformer(torch.nn.Module):
         final_outputs.append(swin_attentions)
 
         return tuple(final_outputs)
-        # Return structure example (training, BERT attentions only, learn_mask=True):
-        # (masked_loss, logits, bert_attentions, sparsity_loss, swin_attentions)
-        # Return structure example (eval, BERT attentions only, learn_mask=False):
-        # (logits, bert_attentions, swin_attentions)
-        # If BERT hidden_states also True:
-        # (logits, bert_hidden_states, bert_attentions, swin_attentions)
     
     def get_loss_sparsity(self, video_attention):
         sparsity_loss = 0
