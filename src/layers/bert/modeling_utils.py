@@ -763,7 +763,7 @@ class PreTrainedModel(nn.Module):
 
         # if model has past, then set the past variable to speed up decoding
         if self._do_output_past(outputs):
-            past = outputs[1]
+            past = outputs[1] if not self.config.output_attentions else outputs[2]
         return next_token_logits, past
 
     def _generate_no_beam_search(
@@ -816,7 +816,7 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
-                past = outputs[1]
+                past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
             if repetition_penalty != 1.0:
@@ -945,7 +945,7 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
-                past = outputs[1]
+                past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty (from CTRL paper https://arxiv.org/abs/1909.05858)
             if repetition_penalty != 1.0:
