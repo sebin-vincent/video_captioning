@@ -751,6 +751,7 @@ class PreTrainedModel(nn.Module):
     def _decode_step(self, input_ids, past):
         model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
         outputs = self(**model_inputs)  # (batch_size * num_beams, cur_len, vocab_size)
+        print(f"outputs len in decode_step: {len(outputs)}")
         token_len = outputs[0].shape[1]
         if self.od_labels_len == 0:
             next_token_idx = token_len - 1
@@ -820,6 +821,7 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
+                print(f"outputs len: {len(outputs)}")
                 past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
@@ -950,6 +952,7 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
+                print(f"outputs len: {len(outputs)}")
                 past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty (from CTRL paper https://arxiv.org/abs/1909.05858)
