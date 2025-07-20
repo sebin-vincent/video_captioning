@@ -562,6 +562,7 @@ class PreTrainedModel(nn.Module):
         eos_token_ids=None,
         length_penalty=None,
         num_return_sequences=None,
+        output_attentions=None,
     ):
         r""" Generates sequences for models with a LM head. The method currently supports greedy or penalized greedy decoding, sampling with top-k or nucleus sampling
         and beam-search.
@@ -647,6 +648,8 @@ class PreTrainedModel(nn.Module):
                 "You tried to generate sequences with a model that does not have a LM Head."
                 "Please use another model class (e.g. `OpenAIGPTLMHeadModel`, `XLNetLMHeadModel`, `GPT2LMHeadModel`, `CTRLLMHeadModel`, `T5WithLMHeadModel`, `TransfoXLLMHeadModel`)"
             )
+        if output_attentions is not None:
+            self.config.output_attentions = output_attentions
 
         max_length = max_length if max_length is not None else self.config.max_length
         do_sample = do_sample if do_sample is not None else self.config.do_sample

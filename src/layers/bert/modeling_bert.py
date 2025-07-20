@@ -1677,6 +1677,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                 return self.prod_no_hidden_generate(*args, **kwargs)
             assert False, 'unknown inference_mode: {}'.format(inference_mode)
         if is_decode:
+            kwargs['output_attentions'] = True
             return self.generate(*args, **kwargs)
         else:
             return self.encode_forward(*args, **kwargs)
