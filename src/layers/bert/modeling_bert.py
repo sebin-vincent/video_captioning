@@ -389,6 +389,8 @@ class BertSelfAttention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
 
         outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
+        if self.output_attentions:
+            print(f"BertSelfAttention outputs len: {len(outputs)}")
         return outputs
 
 
@@ -550,6 +552,7 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
+        print(f"BertEncoder outputs len: {len(outputs)}")
         return outputs  # outputs, (hidden states), (attentions)
 
 
