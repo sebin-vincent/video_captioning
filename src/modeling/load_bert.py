@@ -9,6 +9,7 @@ def get_bert_model(args):
 
     tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name \
             else args.model_name_or_path, do_lower_case=args.do_lower_case)
+    config.output_attentions = True
     config.img_feature_type = 'frcnn'
     config.hidden_dropout_prob = args.drop_out
     config.loss_type = 'classification'

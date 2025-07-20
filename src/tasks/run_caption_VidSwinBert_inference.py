@@ -28,6 +28,7 @@ from src.utils.miscellaneous import (mkdir, set_seed, str_to_bool)
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+from src.utils.attention_utils import map_attention_to_patches, visualize_attention
 
 def _online_video_decode(args, video_path):
     decoder_num_frames = getattr(args, 'max_num_frames', 2)
@@ -101,6 +102,21 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         time_meter = time.time() - tic
         all_caps = outputs[0]  # batch_size * num_keep_best * max_len
         all_confs = torch.exp(outputs[1])
+
+        if args.save_attention_maps:
+            attention_scores = outputs[2]
+            last_layer_attention = attention_scores[-1]
+
+            num_frames = args.max_num_frames
+            patch_resolution = (args.img_res // args.patch_size, args.img_res // args.patch_size)
+
+            attention_maps = map_attention_to_patches(last_layer_attention, num_frames, patch_resolution)
+
+            frames_for_vis = _online_video_decode(args, video_path)
+            frames_for_vis = [Image.fromarray(f) for f in frames_for_vis.numpy().transpose(0, 2, 3, 1)]
+
+            visualize_attention(attention_maps, frames_for_vis, args.attention_maps_output_path)
+            logger.info(f"Attention maps saved to {args.attention_maps_output_path}")
 
         for caps, confs in zip(all_caps, all_confs):
             for cap, conf in zip(caps, confs):
@@ -177,6 +193,8 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument('--save_attention_maps', type=str_to_bool, nargs='?', const=True, default=False)
+    parser.add_argument('--attention_maps_output_path', type=str, default='attention_maps')
     args = base_config.parse_args()
     return args
 
