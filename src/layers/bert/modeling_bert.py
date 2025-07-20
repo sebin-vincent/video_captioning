@@ -545,7 +545,7 @@ class BertEncoder(nn.Module):
             hidden_states = layer_outputs[0]
 
             if self.output_attentions:
-                all_attentions = all_attentions + (layer_outputs[1],)
+                all_attentions = all_attentions + layer_outputs[1:]
 
         outputs = (hidden_states,)
         if self.output_hidden_states:
