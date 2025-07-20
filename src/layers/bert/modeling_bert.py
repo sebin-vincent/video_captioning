@@ -1844,6 +1844,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
             use_cbs=False, fsm=None, num_constraints=None,
             min_constraints_to_satisfy=None, use_hypo=False,
             decoding_constraint_flag=None, bad_ending_ids=None,
+            output_attentions=None,
             ):
         """ Generates captions given image features
         """
@@ -1934,6 +1935,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                     length_penalty,
                     num_beams,
                     vocab_size,
+                    output_attentions=output_attentions,
                 )
             else:
                 output = self._generate_no_beam_search(
@@ -1948,6 +1950,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                     pad_token_id,
                     eos_token_ids,
                     effective_batch_size,
+                    output_attentions=output_attentions,
                 )
         else:
             from src.modeling.utils_cbs import (ConstrainedBeamSearch,

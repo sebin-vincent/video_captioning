@@ -782,6 +782,7 @@ class PreTrainedModel(nn.Module):
         pad_token_id,
         eos_token_ids,
         batch_size,
+        output_attentions=None,
     ):
         """ Generate sequences for each example without beam search (num_beams == 1).
             All returned sequence are generated independantly.
@@ -899,6 +900,7 @@ class PreTrainedModel(nn.Module):
         length_penalty,
         num_beams,
         vocab_size,
+        output_attentions=None,
     ):
         """ Generate sequences for each example with beam search.
         """
