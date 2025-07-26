@@ -105,10 +105,10 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         for caps, confs in zip(all_caps, all_confs):
             for cap, conf in zip(caps, confs):
                 cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
-                logger.info(f"Prediction: {cap}")
-                logger.info(f"Conf: {conf.item()}")
+                print(f"Prediction: {cap}")
+                print(f"Conf: {conf.item()}")
 
-    logger.info(f"Inference model computing time: {time_meter} seconds")
+    print(f"Inference model computing time: {time_meter} seconds")
 
 def check_arguments(args):
     # shared basic checks
