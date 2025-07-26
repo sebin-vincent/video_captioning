@@ -98,6 +98,8 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         tic = time.time()
         outputs = model(**inputs)
 
+        print(outputs)
+
         time_meter = time.time() - tic
         all_caps = outputs[0]  # batch_size * num_keep_best * max_len
         all_confs = torch.exp(outputs[1])
