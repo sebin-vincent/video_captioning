@@ -562,6 +562,7 @@ class PreTrainedModel(nn.Module):
         eos_token_ids=None,
         length_penalty=None,
         num_return_sequences=None,
+        output_attentions=None,
     ):
         r""" Generates sequences for models with a LM head. The method currently supports greedy or penalized greedy decoding, sampling with top-k or nucleus sampling
         and beam-search.
@@ -647,6 +648,8 @@ class PreTrainedModel(nn.Module):
                 "You tried to generate sequences with a model that does not have a LM Head."
                 "Please use another model class (e.g. `OpenAIGPTLMHeadModel`, `XLNetLMHeadModel`, `GPT2LMHeadModel`, `CTRLLMHeadModel`, `T5WithLMHeadModel`, `TransfoXLLMHeadModel`)"
             )
+        if output_attentions is not None:
+            self.config.output_attentions = output_attentions
 
         max_length = max_length if max_length is not None else self.config.max_length
         do_sample = do_sample if do_sample is not None else self.config.do_sample
@@ -750,6 +753,7 @@ class PreTrainedModel(nn.Module):
     def _decode_step(self, input_ids, past):
         model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
         outputs = self(**model_inputs)  # (batch_size * num_beams, cur_len, vocab_size)
+        print(f"outputs len in decode_step: {len(outputs)}")
         token_len = outputs[0].shape[1]
         if self.od_labels_len == 0:
             next_token_idx = token_len - 1
@@ -765,7 +769,7 @@ class PreTrainedModel(nn.Module):
 
         # if model has past, then set the past variable to speed up decoding
         if self._do_output_past(outputs):
-            past = outputs[1]
+            past = outputs[1] if not self.config.output_attentions else outputs[2]
         return next_token_logits, past
 
     def _generate_no_beam_search(
@@ -781,6 +785,7 @@ class PreTrainedModel(nn.Module):
         pad_token_id,
         eos_token_ids,
         batch_size,
+        output_attentions=None,
     ):
         """ Generate sequences for each example without beam search (num_beams == 1).
             All returned sequence are generated independantly.
@@ -823,7 +828,8 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
-                past = outputs[1]
+                print(f"outputs len: {len(outputs)}")
+                past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
             if repetition_penalty != 1.0:
@@ -903,6 +909,7 @@ class PreTrainedModel(nn.Module):
         length_penalty,
         num_beams,
         vocab_size,
+        output_attentions=None,
     ):
         """ Generate sequences for each example with beam search.
         """
@@ -952,7 +959,8 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
-                past = outputs[1]
+                print(f"outputs len: {len(outputs)}")
+                past = outputs[1] if not self.config.output_attentions else outputs[2]
 
             # repetition penalty (from CTRL paper https://arxiv.org/abs/1909.05858)
             if repetition_penalty != 1.0:

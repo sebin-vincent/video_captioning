@@ -389,6 +389,8 @@ class BertSelfAttention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
 
         outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
+        if self.output_attentions:
+            print(f"BertSelfAttention outputs len: {len(outputs)}")
         return outputs
 
 
@@ -543,13 +545,15 @@ class BertEncoder(nn.Module):
             hidden_states = layer_outputs[0]
 
             if self.output_attentions:
-                all_attentions = all_attentions + (layer_outputs[1],)
+                print("Aggregating attentions")
+                all_attentions = all_attentions + layer_outputs[1:]
 
         outputs = (hidden_states,)
         if self.output_hidden_states:
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
+        print(f"BertEncoder outputs len: {len(outputs)}")
         return outputs  # outputs, (hidden states), (attentions)
 
 
@@ -1677,6 +1681,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                 return self.prod_no_hidden_generate(*args, **kwargs)
             assert False, 'unknown inference_mode: {}'.format(inference_mode)
         if is_decode:
+            kwargs['output_attentions'] = True
             return self.generate(*args, **kwargs)
         else:
             return self.encode_forward(*args, **kwargs)
@@ -1843,6 +1848,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
             use_cbs=False, fsm=None, num_constraints=None,
             min_constraints_to_satisfy=None, use_hypo=False,
             decoding_constraint_flag=None, bad_ending_ids=None,
+            output_attentions=None,
             ):
         """ Generates captions given image features
         """
@@ -1933,6 +1939,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                     length_penalty,
                     num_beams,
                     vocab_size,
+                    output_attentions=output_attentions,
                 )
             else:
                 output = self._generate_no_beam_search(
@@ -1947,6 +1954,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
                     pad_token_id,
                     eos_token_ids,
                     effective_batch_size,
+                    output_attentions=output_attentions,
                 )
         else:
             from src.modeling.utils_cbs import (ConstrainedBeamSearch,

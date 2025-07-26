@@ -43,7 +43,7 @@ def _transforms(args, frames):
         CenterCrop((args.img_res,args.img_res)),
         ClipToTensor(channel_nb=3),
         Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])
-    ]            
+    ]
     raw_video_prcoess = Compose(raw_video_crop_list)
 
     frames = frames.numpy()
@@ -58,7 +58,7 @@ def _transforms(args, frames):
     crop_frames = raw_video_prcoess(frame_list)
     # (C x T x H x W) --> (T x C x H x W)
     crop_frames = crop_frames.permute(1, 0, 2, 3)
-    return crop_frames 
+    return crop_frames
 
 def inference(args, video_path, model, tokenizer, tensorizer):
     cls_token_id, sep_token_id, pad_token_id, mask_token_id, period_token_id = \
@@ -117,11 +117,11 @@ def check_arguments(args):
     basic_check_arguments(args)
     # additional sanity check:
     args.max_img_seq_length = int((args.max_num_frames/2)*(int(args.img_res)/32)*(int(args.img_res)/32))
-    
+
     if args.freeze_backbone or args.backbone_coef_lr == 0:
         args.backbone_coef_lr = 0
         args.freeze_backbone = True
-    
+
     if 'reload_pretrained_swin' not in args.keys():
         args.reload_pretrained_swin = False
 
@@ -129,11 +129,11 @@ def check_arguments(args):
         logger.info("No pretrained_checkpoint to be loaded, disable --reload_pretrained_swin")
         args.reload_pretrained_swin = False
 
-    if args.learn_mask_enabled==True: 
+    if args.learn_mask_enabled==True:
         args.attn_mask_type = 'learn_vid_att'
 
 def update_existing_config_for_inference(args):
-    ''' load swinbert args for evaluation and inference 
+    ''' load swinbert args for evaluation and inference
     '''
     assert args.do_test or args.do_eval
     checkpoint = args.eval_model_dir
@@ -155,6 +155,7 @@ def update_existing_config_for_inference(args):
     train_args.do_test = True
     train_args.val_yaml = args.val_yaml
     train_args.test_video_fname = args.test_video_fname
+    train_args.output_attentions = True
     return train_args
 
 def get_custom_args(base_config):
@@ -203,12 +204,12 @@ def main(args):
     logger.info(f"Cuda version is: {torch.version.cuda}")
     logger.info(f"cuDNN version is : {torch.backends.cudnn.version()}" )
 
-     # Get Video Swin model 
+     # Get Video Swin model
     swin_model = get_swin_model(args)
-    # Get BERT and tokenizer 
+    # Get BERT and tokenizer
     bert_model, config, tokenizer = get_bert_model(args)
     # build SwinBERT based on training configs
-    vl_transformer = VideoTransformer(args, config, swin_model, bert_model) 
+    vl_transformer = VideoTransformer(args, config, swin_model, bert_model)
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 
     # load weights for inference
