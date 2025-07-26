@@ -1,0 +1,14 @@
+"{target-Folder}\datasets\MSRVTT-v2\current.json"
+"{target-Folder}\datasets\MSVD\msvd-retrieval_train-val-test.json"
+"{target-Folder}\datasets\MSVD\annotations.txt"
+"{target-Folder}\docs\*"
+"{target-Folder}\src\evalcap\cider\pyciderevalcap\tokenizer\stanford-corenlp-3.4.1.jar"
+video_captioning-feat-swinbert-explainability/video_captioning-feat-swinbert-explainability/src/evalcap/cider/data/*
+"{target-Folder}\src\evalcap\cider\pyciderevalcap\tokenizer\stanford-corenlp-3.4.1.jar"
+"{target-Folder}\src\evalcap\coco_caption\cocoEvalCapDemo.ipynb"
+{target-Folder}\src\evalcap\coco_caption\annotations\*
+"{target-Folder}\src\evalcap\coco_caption\pycocoevalcap\meteor\meteor-1.5.jar"
+"{target-Folder}\src\evalcap\coco_caption\pycocoevalcap\meteor\data\*"
+"{target-Folder}\src\evalcap\coco_caption\pycocoevalcap\spice\lib\*"
+{target-Folder}/src/evalcap/coco_caption/pycocoevalcap/spice/spice-1.0.jar
+"{target-Folder}\src\evalcap\coco_caption\pycocoevalcap\tokenizer\stanford-corenlp-3.4.1.jar"
