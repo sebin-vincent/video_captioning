@@ -709,6 +709,7 @@ class PreTrainedModel(nn.Module):
             effective_batch_size = batch_size
 
         if num_beams > 1:
+            print("Beam Search")
             output = self._generate_beam_search(
                 input_ids,
                 cur_len,
@@ -726,6 +727,7 @@ class PreTrainedModel(nn.Module):
                 vocab_size,
             )
         else:
+            print("No beam Search")
             output = self._generate_no_beam_search(
                 input_ids,
                 cur_len,
