@@ -14,6 +14,7 @@ import torch
 import torch.distributed as dist
 from apex import amp
 import deepspeed
+import cv2
 from src.configs.config import (basic_check_arguments, shared_configs)
 from src.datasets.data_utils.video_ops import extract_frames_from_video_path
 from src.datasets.data_utils.video_transforms import Compose, Resize, Normalize, CenterCrop
@@ -28,6 +29,71 @@ from src.utils.miscellaneous import (mkdir, set_seed, str_to_bool)
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+
+def save_attention_maps(args, video_path, frames, generated_text, cross_attentions):
+
+    output_dir = op.join(args.eval_model_dir, "visualizations")
+    mkdir(output_dir)
+
+    # a frame every 2 seconds
+    frame_interval = 2
+
+    num_frames_to_save = args.max_num_frames // frame_interval
+
+    video_frames = []
+    for i in range(num_frames_to_save):
+        frame = frames[i * frame_interval].numpy()
+        frame = np.transpose(frame, (1, 2, 0))
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        frame = (frame * std + mean) * 255
+        frame = frame.astype(np.uint8)
+        video_frames.append(frame)
+
+
+    # process cross-attentions
+    # cross_attentions: a list of 6 tensors, each of shape (1, 12, 786, 786)
+    # 6 layers, 12 heads, 786 tokens (text + video)
+
+    num_layers = len(cross_attentions)
+    num_heads = cross_attentions[0].shape[1]
+
+    # average across layers and heads
+    avg_cross_attention = torch.mean(torch.stack(cross_attentions), dim=0)
+    avg_cross_attention = torch.mean(avg_cross_attention, dim=1)
+
+    # 786 tokens = 1 (CLS) + 784 (video patches) + 1 (SEP)
+    # The generated text starts from the second token (index 1)
+
+    generated_tokens = generated_text.split()
+
+    for i, token in enumerate(generated_tokens):
+        # attention scores for the i-th generated token
+        # The first 785 tokens are for the video patches
+        attention_scores = avg_cross_attention[0, 1 + i, 1:785]
+
+        # reshape to a 2D attention map
+        attention_map = attention_scores.reshape(28, 28).cpu().numpy()
+
+        # normalize and resize to frame size
+        attention_map = (attention_map - np.min(attention_map)) / (np.max(attention_map) - np.min(attention_map))
+        attention_map = cv2.resize(attention_map, (args.img_res, args.img_res))
+
+        # apply colormap
+        heatmap = cv2.applyColorMap(np.uint8(255 * attention_map), cv2.COLORMAP_JET)
+
+        # overlay heatmap on each frame
+        for j, frame in enumerate(video_frames):
+            overlaid_frame = cv2.addWeighted(frame, 0.6, heatmap, 0.4, 0)
+
+            # put text on the frame
+            text = f"Word: {token}"
+            cv2.putText(overlaid_frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+            # save frame
+            output_path = op.join(output_dir, f"word_{i}_{token}_frame_{j}.jpg")
+            cv2.imwrite(output_path, overlaid_frame)
+
 
 def _online_video_decode(args, video_path):
     decoder_num_frames = getattr(args, 'max_num_frames', 2)
@@ -113,9 +179,12 @@ def inference(args, video_path, model, tokenizer, tensorizer):
 
         for caps, confs in zip(all_caps, all_confs):
             for cap, conf in zip(caps, confs):
-                cap = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
-                print(f"Prediction: {cap}")
+                cap_text = tokenizer.decode(cap.tolist(), skip_special_tokens=True)
+                print(f"Prediction: {cap_text}")
                 print(f"Conf: {conf.item()}")
+                if args.save_attention_maps:
+                    save_attention_maps(args, video_path, frames, cap_text, cross_attentions)
+
 
     print(f"Inference model computing time: {time_meter} seconds")
 
@@ -186,6 +255,7 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument("--save_attention_maps", type=str_to_bool, nargs='?', const=True, default=False)
     args = base_config.parse_args()
     return args
 
