@@ -53,24 +53,18 @@ def save_attention_maps(args, video_path, frames, generated_text, cross_attentio
 
     # process cross-attentions
     # cross_attentions: a list of 6 tensors, each of shape (1, 12, 786, 786)
-    # 6 layers, 12 heads, 786 tokens (text + video)
-
-    num_layers = len(cross_attentions)
-    num_heads = cross_attentions[0][0].shape[1]
-
-    # average across layers and heads
-    avg_cross_attention = torch.mean(torch.stack([x[0] for x in cross_attentions]), dim=0)
-    avg_cross_attention = torch.mean(avg_cross_attention, dim=1)
-
-    # 786 tokens = 1 (CLS) + 784 (video patches) + 1 (SEP)
-    # The generated text starts from the second token (index 1)
-
     generated_tokens = generated_text.split()
 
     for i, token in enumerate(generated_tokens):
+        # cross_attentions[i] is a tuple of 12 attention heads for the i-th word
+        # each head is a tensor of shape (1, 12, 786, 786)
+
+        # average across heads
+        avg_head_attention = torch.mean(torch.stack(cross_attentions[i]), dim=0)
+
         # attention scores for the i-th generated token
         # The first 785 tokens are for the video patches
-        attention_scores = avg_cross_attention[0, 1 + i, 1:785]
+        attention_scores = avg_head_attention[0, 0, 1:785]
 
         # reshape to a 2D attention map
         attention_map = attention_scores.reshape(28, 28).cpu().numpy()
