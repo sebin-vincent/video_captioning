@@ -56,10 +56,10 @@ def save_attention_maps(args, video_path, frames, generated_text, cross_attentio
     # 6 layers, 12 heads, 786 tokens (text + video)
 
     num_layers = len(cross_attentions)
-    num_heads = cross_attentions[0].shape[1]
+    num_heads = cross_attentions[0][0].shape[1]
 
     # average across layers and heads
-    avg_cross_attention = torch.mean(torch.stack(cross_attentions), dim=0)
+    avg_cross_attention = torch.mean(torch.stack([x[0] for x in cross_attentions]), dim=0)
     avg_cross_attention = torch.mean(avg_cross_attention, dim=1)
 
     # 786 tokens = 1 (CLS) + 784 (video patches) + 1 (SEP)
