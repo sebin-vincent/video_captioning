@@ -540,6 +540,9 @@ class PreTrainedModel(nn.Module):
         has_output_past = hasattr(self.config, "output_past") and self.config.output_past
         has_mem_len = hasattr(self.config, "mem_len") and self.config.mem_len
 
+        print(f"has_output_past :{has_output_past}")
+        print(f"has_mem_len :{has_mem_len}")
+
         if has_output_past and not has_mem_len and len(outputs) > 1:
             return True
         elif has_mem_len and self.config.mem_len > 0 and len(outputs) > 1:
