@@ -795,10 +795,6 @@ class PreTrainedModel(nn.Module):
             attention_scores = outputs[1]
             cross_attentions.append(outputs[1])
 
-            print(f"Attention score type: {type(attention_scores)}")
-            print(f"Attention score len: {len(attention_scores)}")
-            print(f"first head attention score, shape:{attention_scores[0].shape}")
-
             # print(outputs)
             if cur_len == 1:
                 token_len = 2 + self.od_labels_len

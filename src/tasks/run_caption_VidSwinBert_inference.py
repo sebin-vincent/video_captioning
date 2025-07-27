@@ -1,9 +1,6 @@
 from __future__ import absolute_import, division, print_function
 import os
 import sys
-
-from sympy.physics.vector import cross
-
 pythonpath = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 print(pythonpath)
@@ -106,6 +103,11 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         all_caps = outputs["sequences"]  # batch_size * num_keep_best * max_len
         all_confs = torch.exp(outputs["logprobs"])
         cross_attentions = outputs["cross_attentions"]
+
+        print(f"cross_attentions type: {type(cross_attentions)}")
+        print(f"cross_attentions len: {len(cross_attentions)}")
+        print(f"number of heads for cross_attentions for first word: {len(cross_attentions[0])}")
+        print(f"Shape of first head attention scores for first word:{cross_attentions[0][0].shape}")
 
         for caps, confs in zip(all_caps, all_confs):
             for cap, conf in zip(caps, confs):

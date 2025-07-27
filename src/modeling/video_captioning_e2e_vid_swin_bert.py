@@ -59,10 +59,10 @@ class VideoTransformer(torch.nn.Module):
             kwargs['attention_mask'][:, -vid_att_len::, -vid_att_len::] = learn_att
         outputs = self.trans_encoder(*args, **kwargs)
         print("Output from forward method")
-        print(outputs)
+        print(outputs["sequences"])
         if self.learn_mask_enabled:
             loss_sparsity = self.get_loss_sparsity(video_attention)  
-            outputs = outputs + (loss_sparsity, )          
+            outputs['loss_sparsity'] = loss_sparsity
         return outputs
     
     def get_loss_sparsity(self, video_attention):
