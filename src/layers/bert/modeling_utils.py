@@ -785,17 +785,19 @@ class PreTrainedModel(nn.Module):
 
         past = None
 
-        iteration=0
-
+        iteration=1
+        cross_attentions=[]
         while cur_len < max_length:
             print(f"_generate_no_beam_search, iteration={iteration}")
             model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
             iteration=iteration+1
             outputs = self(**model_inputs)
             attention_scores = outputs[1]
+            cross_attentions.append(outputs[1])
 
             print(f"Attention score type: {type(attention_scores)}")
-            print(f"Attention score shape: {attention_scores.shape}")
+            print(f"Attention score len: {len(attention_scores)}")
+            print(f"first head attention score, shape:{attention_scores[0].shape}")
 
             # print(outputs)
             if cur_len == 1:
@@ -877,7 +879,12 @@ class PreTrainedModel(nn.Module):
             input_ids = torch.cat([input_ids, padding_ids], dim=1)
 
         # (batch_size, n_best, max_len), (batch_size, n_best)
-        return input_ids.unsqueeze(1), logprobs.unsqueeze(1)
+
+        return {
+        "sequences": input_ids.unsqueeze(1),
+        "logprobs": logprobs.unsqueeze(1),
+        "cross_attentions": cross_attentions
+    }
 
     def _generate_beam_search(
         self,
