@@ -1988,7 +1988,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
         return x
 
     def _do_output_past(self, outputs):
-        return len(outputs) > 1
+        return len(outputs) > 2
 
     def prod_generate(self, img_feats, od_label_ids, max_length,
             bos_token_id, eos_token_ids, mask_token_id, od_labels_start_posid,

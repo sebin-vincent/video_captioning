@@ -533,22 +533,6 @@ class PreTrainedModel(nn.Module):
 
         return model
 
-    def prepare_inputs_for_generation(self, input_ids, **kwargs):
-        return {"input_ids": input_ids}
-
-    def _do_output_past(self, outputs):
-        has_output_past = hasattr(self.config, "output_past") and self.config.output_past
-        has_mem_len = hasattr(self.config, "mem_len") and self.config.mem_len
-
-        print(f"has_output_past :{has_output_past}")
-        print(f"has_mem_len :{has_mem_len}")
-
-        if has_output_past and not has_mem_len and len(outputs) > 1:
-            return True
-        elif has_mem_len and self.config.mem_len > 0 and len(outputs) > 1:
-            return True
-
-        return False
 
     def generate(
         self,
@@ -804,11 +788,16 @@ class PreTrainedModel(nn.Module):
         iteration=0
 
         while cur_len < max_length:
-            iteration=iteration+1
-            model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
-            outputs = self(**model_inputs)
             print(f"_generate_no_beam_search, iteration={iteration}")
-            print(outputs)
+            model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
+            iteration=iteration+1
+            outputs = self(**model_inputs)
+            attention_scores = outputs[1]
+
+            print(f"Attention score type: {type(attention_scores)}")
+            print(f"Attention score shape: {attention_scores.shape}")
+
+            # print(outputs)
             if cur_len == 1:
                 token_len = 2 + self.od_labels_len
                 next_token_idx = 1
@@ -826,7 +815,7 @@ class PreTrainedModel(nn.Module):
 
             # if model has past, then set the past variable to speed up decoding
             if self._do_output_past(outputs):
-                past = outputs[1]
+                past = outputs[2]
 
             # repetition penalty from CTRL paper (https://arxiv.org/abs/1909.05858)
             if repetition_penalty != 1.0:
