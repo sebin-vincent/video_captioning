@@ -104,10 +104,12 @@ def inference(args, video_path, model, tokenizer, tensorizer):
         all_confs = torch.exp(outputs["logprobs"])
         cross_attentions = outputs["cross_attentions"]
 
-        print(f"cross_attentions type: {type(cross_attentions)}")
-        print(f"cross_attentions len: {len(cross_attentions)}")
-        print(f"number of heads for cross_attentions for first word: {len(cross_attentions[0])}")
-        print(f"Shape of first head attention scores for first word:{cross_attentions[0][0].shape}")
+
+
+        print(f"cross_attentions type: {type(cross_attentions)}") # cross_attentions type: <class 'list'>
+        print(f"cross_attentions len: {len(cross_attentions)}")   # cross_attentions len: 6
+        print(f"number of heads for cross_attentions for first word: {len(cross_attentions[0])}")  # number of heads for cross_attentions for first word: 12
+        print(f"Shape of first head attention scores for first word:{cross_attentions[0][0].shape}")  # Shape of first head attention scores for first word:torch.Size([1, 12, 786, 786])
 
         for caps, confs in zip(all_caps, all_confs):
             for cap, conf in zip(caps, confs):
