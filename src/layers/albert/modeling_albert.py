@@ -598,7 +598,6 @@ class AlbertPreTrainedModel(PreTrainedModel):
     """
 
     config_class = AlbertConfig
-    load_tf_weights = load_tf_weights_in_albert
     base_model_prefix = "albert"
     _keys_to_ignore_on_load_missing = [r"position_ids"]
 
