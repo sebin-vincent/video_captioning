@@ -19,6 +19,8 @@ import boto3
 import requests
 from botocore.exceptions import ClientError
 from tqdm import tqdm
+from dataclasses import dataclass, fields
+from typing import Any, Optional, Tuple
 
 try:
     from torch.hub import _get_torch_home
@@ -260,3 +262,64 @@ def get_from_cache(url, cache_dir=None):
             logger.info("removing temp file %s", temp_file.name)
 
     return cache_path
+
+@dataclass
+class ModelOutput:
+    """
+    Base class for all model outputs as dataclass. Has a `__getitem__` that allows indexing and slicing.
+    """
+
+    def __post_init__(self):
+        self._keys = [f.name for f in fields(self)]
+
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            return getattr(self, item)
+        else:
+            return self.to_tuple()[item]
+
+    def __iter__(self):
+        return iter(self.to_tuple())
+
+    def __len__(self):
+        return len(self.to_tuple())
+
+    def to_tuple(self) -> Tuple[Any, ...]:
+        """
+        Convert self to a tuple containing all the attributes/keys that are not `None`.
+        """
+        return tuple(getattr(self, k) for k in self._keys if getattr(self, k) is not None)
+
+def add_code_sample_docstrings(*docstr):
+    def docstring_decorator(fn):
+        fn.__doc__ = ''.join(docstr) + (fn.__doc__ if fn.__doc__ is not None else '')
+        return fn
+    return docstring_decorator
+
+def add_start_docstrings(*docstr):
+    def docstring_decorator(fn):
+        fn.__doc__ = ''.join(docstr) + (fn.__doc__ if fn.__doc__ is not None else '')
+        return fn
+    return docstring_decorator
+
+def add_start_docstrings_to_model_forward(*docstr):
+    def docstring_decorator(fn):
+        fn.__doc__ = ''.join(docstr) + (fn.__doc__ if fn.__doc__ is not None else '')
+        return fn
+    return docstring_decorator
+
+def replace_return_docstrings(output_type, config_class):
+    def docstring_decorator(fn):
+        docstrings = fn.__doc__.split("Returns:")
+        original_return = docstrings[1]
+        new_return = f"""
+    Returns:
+        [`{output_type.__name__}`] or `tuple(torch.FloatTensor)`: A [`{output_type.__name__}`] or a tuple of
+        `torch.FloatTensor` (if `return_dict=False` is passed or when `config.return_dict=False`) comprising
+        various elements depending on the configuration ([`{config_class.__name__}`]) and inputs.
+
+        {original_return}
+"""
+        fn.__doc__ = docstrings[0] + new_return
+        return fn
+    return docstring_decorator
