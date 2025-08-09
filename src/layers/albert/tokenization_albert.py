@@ -175,6 +175,12 @@ class AlbertTokenizer(PreTrainedTokenizer):
         """Converts an index (integer) in a token (string/unicode) using the vocab."""
         return self.ids_to_tokens.get(index, self.unk_token)
 
+    def get_random_token(self):
+        """Get a random token from the vocabulary for masking."""
+        from random import randint
+        i = randint(0, len(self.vocab))
+        return self._convert_id_to_token(i)
+
     def convert_tokens_to_string(self, tokens):
         """ Converts a sequence of tokens (string) in a single string. """
         out_string = ' '.join(tokens).replace(' ##', '').strip()
