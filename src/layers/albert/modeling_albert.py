@@ -357,14 +357,21 @@ class AlbertAttention(nn.Module):
         if attention_mask is not None:
             # Fix: Ensure attention_mask has the right dimensions for attention_scores
             # attention_scores shape: [batch, heads, seq, seq] (4D)
-            # attention_mask might be 5D: [batch, 1, 1, seq, seq], so squeeze extra dims
+            # attention_mask needs to be broadcastable to this shape
             if attention_mask.dim() == 5:
-                attention_mask_fixed = attention_mask.squeeze(1).squeeze(1)  # Remove middle dims
+                # 5D: [batch, 1, 1, seq, seq] -> squeeze -> [batch, seq, seq] -> unsqueeze -> [batch, 1, seq, seq]
+                attention_mask_fixed = attention_mask.squeeze(1).squeeze(1).unsqueeze(1)  # [batch, 1, seq, seq]
                 print(f"  🔧 Fixed attention_mask from {attention_mask.shape} to {attention_mask_fixed.shape}")
             elif attention_mask.dim() == 4:
                 attention_mask_fixed = attention_mask
+            elif attention_mask.dim() == 3:
+                # 3D: [batch, seq, seq] -> add head dimension -> [batch, 1, seq, seq]
+                attention_mask_fixed = attention_mask.unsqueeze(1)  # Add head dimension
+                print(f"  🔧 Fixed attention_mask from {attention_mask.shape} to {attention_mask_fixed.shape}")
             else:
                 raise ValueError(f"Unexpected attention_mask dimensions: {attention_mask.shape}")
+            
+            print(f"  📐 Broadcasting: attention_scores {attention_scores.shape} + attention_mask {attention_mask_fixed.shape}")
             attention_scores = attention_scores + attention_mask_fixed
 
         # Normalize the attention scores to probabilities.
