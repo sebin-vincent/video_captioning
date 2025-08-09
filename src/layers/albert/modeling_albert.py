@@ -355,7 +355,17 @@ class AlbertAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         # Apply the attention mask is (precomputed for all layers in AlbertModel forward() function)
         if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask
+            # Fix: Ensure attention_mask has the right dimensions for attention_scores
+            # attention_scores shape: [batch, heads, seq, seq] (4D)
+            # attention_mask might be 5D: [batch, 1, 1, seq, seq], so squeeze extra dims
+            if attention_mask.dim() == 5:
+                attention_mask_fixed = attention_mask.squeeze(1).squeeze(1)  # Remove middle dims
+                print(f"  🔧 Fixed attention_mask from {attention_mask.shape} to {attention_mask_fixed.shape}")
+            elif attention_mask.dim() == 4:
+                attention_mask_fixed = attention_mask
+            else:
+                raise ValueError(f"Unexpected attention_mask dimensions: {attention_mask.shape}")
+            attention_scores = attention_scores + attention_mask_fixed
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
