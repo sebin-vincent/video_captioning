@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Tokenization classes."""
+"""Tokenization classes for ALBERT."""
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
@@ -35,36 +35,26 @@ VOCAB_FILES_NAMES = {'vocab_file': 'vocab.txt'}
 PRETRAINED_VOCAB_FILES_MAP = {
     'vocab_file':
     {
-        'bert-base-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-vocab.txt",
-        'bert-large-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-vocab.txt",
-        'bert-base-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-vocab.txt",
-        'bert-large-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-vocab.txt",
-        'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased-vocab.txt",
-        'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased-vocab.txt",
-        'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese-vocab.txt",
-        'bert-base-german-cased': "https://int-deepset-models-bert.s3.eu-central-1.amazonaws.com/pytorch/bert-base-german-cased-vocab.txt",
-        'bert-large-uncased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-vocab.txt",
-        'bert-large-cased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-vocab.txt",
-        'bert-large-uncased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-finetuned-squad-vocab.txt",
-        'bert-large-cased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-finetuned-squad-vocab.txt",
-        'bert-base-cased-finetuned-mrpc': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-finetuned-mrpc-vocab.txt",
+        'albert-base-v1': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-base-v1-vocab.txt",
+        'albert-large-v1': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v1-vocab.txt",
+        'albert-xlarge-v1': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xlarge-v1-vocab.txt",
+        'albert-xxlarge-v1': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xxlarge-v1-vocab.txt",
+        'albert-base-v2': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-base-v2-vocab.txt",
+        'albert-large-v2': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-large-v2-vocab.txt",
+        'albert-xlarge-v2': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xlarge-v2-vocab.txt",
+        'albert-xxlarge-v2': "https://s3.amazonaws.com/models.huggingface.co/bert/albert-xxlarge-v2-vocab.txt",
     }
 }
 
 PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    'bert-base-uncased': 512,
-    'bert-large-uncased': 512,
-    'bert-base-cased': 512,
-    'bert-large-cased': 512,
-    'bert-base-multilingual-uncased': 512,
-    'bert-base-multilingual-cased': 512,
-    'bert-base-chinese': 512,
-    'bert-base-german-cased': 512,
-    'bert-large-uncased-whole-word-masking': 512,
-    'bert-large-cased-whole-word-masking': 512,
-    'bert-large-uncased-whole-word-masking-finetuned-squad': 512,
-    'bert-large-cased-whole-word-masking-finetuned-squad': 512,
-    'bert-base-cased-finetuned-mrpc': 512,
+    'albert-base-v1': 512,
+    'albert-large-v1': 512,
+    'albert-xlarge-v1': 512,
+    'albert-xxlarge-v1': 512,
+    'albert-base-v2': 512,
+    'albert-large-v2': 512,
+    'albert-xlarge-v2': 512,
+    'albert-xxlarge-v2': 512,
 }
 
 def load_vocab(vocab_file):
@@ -89,15 +79,15 @@ def whitespace_tokenize(text):
 
 class AlbertTokenizer(PreTrainedTokenizer):
     r"""
-    Constructs a AlbertTokenizer.
-    :class:`~pytorch_pretrained_bert.AlbertTokenizer` runs end-to-end tokenization: punctuation splitting + wordpiece
+    Constructs an AlbertTokenizer.
+    :class:`~transformers.AlbertTokenizer` runs end-to-end tokenization: punctuation splitting + wordpiece
 
     Args:
         vocab_file: Path to a one-wordpiece-per-line vocabulary file
         do_lower_case: Whether to lower case the input. Only has an effect when do_wordpiece_only=False
         do_basic_tokenize: Whether to do basic tokenization before wordpiece.
         max_len: An artificial maximum length to truncate tokenized sequences to; Effective maximum length is always the
-            minimum of this value (if specified) and the underlying BERT model's sequence length.
+            minimum of this value (if specified) and the underlying ALBERT model's sequence length.
         never_split: List of tokens which will never be split during tokenization. Only has an effect when
             do_wordpiece_only=False
     """
@@ -107,9 +97,9 @@ class AlbertTokenizer(PreTrainedTokenizer):
     max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(self, vocab_file, do_lower_case=True, do_basic_tokenize=True, never_split=None,
-                 unk_token="[UNK]", sep_token="[SEP]", pad_token="[PAD]", cls_token="[CLS]",
+                 unk_token="<unk>", sep_token="[SEP]", pad_token="<pad>", cls_token="[CLS]",
                  mask_token="[MASK]", tokenize_chinese_chars=True, **kwargs):
-        """Constructs a AlbertTokenizer.
+        """Constructs an AlbertTokenizer.
 
         Args:
             **vocab_file**: Path to a one-wordpiece-per-line vocabulary file
@@ -141,7 +131,8 @@ class AlbertTokenizer(PreTrainedTokenizer):
             self.basic_tokenizer = BasicTokenizer(do_lower_case=do_lower_case,
                                                   never_split=never_split,
                                                   tokenize_chinese_chars=tokenize_chinese_chars)
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab,
+                                                      unk_token=self.unk_token)
 
     @property
     def vocab_size(self):
@@ -162,15 +153,19 @@ class AlbertTokenizer(PreTrainedTokenizer):
         basic_tokens = []
         sub_to_token_idx_map = []
         if self.do_basic_tokenize:
-            for idx, token in enumerate(
-                    self.basic_tokenizer.tokenize(text, never_split=self.all_special_tokens)):
+            token_idx = 0
+            for token in self.basic_tokenizer.tokenize(text, never_split=self.all_special_tokens):
                 basic_tokens.append(token)
                 for sub_token in self.wordpiece_tokenizer.tokenize(token):
                     split_tokens.append(sub_token)
-                    sub_to_token_idx_map.append(idx)
-            return (split_tokens, basic_tokens, sub_to_token_idx_map)
+                    sub_to_token_idx_map.append(token_idx)
+                token_idx += 1
         else:
-            raise ValueError(f"_tokenize_for_pos_tag must set self.do_basic_tokenize as True")
+            for token in self.wordpiece_tokenizer.tokenize(text):
+                split_tokens.append(token)
+                basic_tokens.append(token)
+                sub_to_token_idx_map.append(len(basic_tokens) - 1)
+        return (split_tokens, basic_tokens, sub_to_token_idx_map)
 
     def _convert_token_to_id(self, token):
         """ Converts a token (str/unicode) in an id using the vocab. """
@@ -185,11 +180,13 @@ class AlbertTokenizer(PreTrainedTokenizer):
         out_string = ' '.join(tokens).replace(' ##', '').strip()
         return out_string
 
-    def save_vocabulary(self, vocab_path):
-        """Save the tokenizer vocabulary to a directory or file."""
+    def save_vocabulary(self, save_directory):
+        """Save the tokenizer vocabulary to a directory."""
         index = 0
-        if os.path.isdir(vocab_path):
-            vocab_file = os.path.join(vocab_path, VOCAB_FILES_NAMES['vocab_file'])
+        if os.path.isdir(save_directory):
+            vocab_file = os.path.join(save_directory, VOCAB_FILES_NAMES['vocab_file'])
+        else:
+            vocab_file = save_directory
         with open(vocab_file, "w", encoding="utf-8") as writer:
             for token, token_index in sorted(self.vocab.items(), key=lambda kv: kv[1]):
                 if index != token_index:
@@ -200,13 +197,12 @@ class AlbertTokenizer(PreTrainedTokenizer):
                 index += 1
         return (vocab_file,)
 
-    def get_random_token(self):
-        i = randint(0, len(self.vocab))
-        return self._convert_id_to_token(i)
-
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *inputs, **kwargs):
-        """ Instantiate a AlbertTokenizer from pre-trained vocabulary files.
+        """
+        Instantiate a PreTrainedTokenizer from a pre-trained model vocabulary.
+
+        The tokenizer will be loaded from a vocabulary file and a merges file.
         """
         if pretrained_model_name_or_path in PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES:
             if '-cased' in pretrained_model_name_or_path and kwargs.get('do_lower_case', True):
@@ -216,8 +212,8 @@ class AlbertTokenizer(PreTrainedTokenizer):
                 kwargs['do_lower_case'] = False
             elif '-cased' not in pretrained_model_name_or_path and not kwargs.get('do_lower_case', True):
                 logger.warning("The pre-trained model you are loading is an uncased model but you have set "
-                               "`do_lower_case` to False. We are setting `do_lower_case=True` for you "
-                               "but you may want to check this behavior.")
+                               "`do_lower_case` to False. We are setting `do_lower_case=True` for you but "
+                               "you may want to check this behavior.")
                 kwargs['do_lower_case'] = True
 
         return super(AlbertTokenizer, cls)._from_pretrained(pretrained_model_name_or_path, *inputs, **kwargs)
@@ -250,11 +246,11 @@ class BasicTokenizer(object):
         """ Basic Tokenization of a piece of text.
             Split on "white spaces" only, for sub-word tokenization, see WordPieceTokenizer.
 
-        Args:
-            **never_split**: (`optional`) list of str
-                Kept for backward compatibility purposes.
-                Now implemented directly at the base class level (see :func:`PreTrainedTokenizer.tokenize`)
-                List of token not to split.
+            Args:
+                **never_split**: (`optional`) list of str
+                    Kept for backward compatibility purposes.
+                    Now implemented directly at the base class level (see :func:`PreTrainedTokenizer.tokenize`)
+                    List of token not to split.
         """
         never_split = self.never_split + (never_split if never_split is not None else [])
         text = self._clean_text(text)
@@ -272,7 +268,7 @@ class BasicTokenizer(object):
             if self.do_lower_case and token not in never_split:
                 token = token.lower()
                 token = self._run_strip_accents(token)
-            split_tokens.extend(self._run_split_on_punc(token))
+            split_tokens.extend(self._run_split_on_punc(token, never_split))
 
         output_tokens = whitespace_tokenize(" ".join(split_tokens))
         return output_tokens
@@ -325,14 +321,13 @@ class BasicTokenizer(object):
 
     def _is_chinese_char(self, cp):
         """Checks whether CP is the codepoint of a CJK character."""
-        # This defines a "chinese character" as anything in the CJK Unicode block:
+        # This defines a "chinese character" as anything in the CJK Unicode blocks:
         #   https://en.wikipedia.org/wiki/CJK_Unified_Ideographs_(Unicode_block)
+        #   https://en.wikipedia.org/wiki/CJK_Unified_Ideographs_Extension_A_(Unicode_block)
+        #   https://en.wikipedia.org/wiki/CJK_Unified_Ideographs_Extension_B_(Unicode_block)
         #
-        # Note that the CJK Unicode block is NOT all Japanese and Korean characters,
-        # despite its name. The modern Korean Hangul alphabet is a different block,
-        # as is Japanese Hiragana and Katakana. Those alphabets are used to write
-        # space-separated words, so they are not treated specially and handled
-        # like the all of the other languages.
+        # Note that the CJK Unicode blocks are NOT all contiguous,
+        # so we need to check the table.
         if ((cp >= 0x4E00 and cp <= 0x9FFF) or  #
                 (cp >= 0x3400 and cp <= 0x4DBF) or  #
                 (cp >= 0x20000 and cp <= 0x2A6DF) or  #
@@ -379,7 +374,7 @@ class WordpieceTokenizer(object):
 
         Args:
           text: A single token or whitespace separated tokens. This should have
-            already been passed through `BasicTokenizer`.
+            already been passed through `BasicTokenizer.
 
         Returns:
           A list of wordpiece tokens.

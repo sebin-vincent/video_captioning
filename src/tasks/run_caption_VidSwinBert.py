@@ -32,7 +32,7 @@ from src.utils.tsv_file_ops import tsv_writer, reorder_tsv_keys
 from src.utils.deepspeed import get_deepspeed_config, fp32_to_fp16
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
-from src.modeling.load_bert import get_bert_model
+from src.modeling.load_albert import get_albert_model
 from src.solver import AdamW, WarmupLinearLR
 
 from azureml.core.run import Run
@@ -564,7 +564,7 @@ def main(args):
     # Get Video Swin model 
     swin_model = get_swin_model(args)
     # Get BERT and tokenizer 
-    bert_model, config, tokenizer = get_bert_model(args)
+    bert_model, config, tokenizer = get_albert_model(args)
     # build SwinBERT based on training configs
     vl_transformer = VideoTransformer(args, config, swin_model, bert_model) 
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)

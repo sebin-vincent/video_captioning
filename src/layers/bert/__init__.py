@@ -1,12 +1,12 @@
 __version__ = "1.0.0"
-from .tokenization_bert import BertTokenizer, BasicTokenizer, WordpieceTokenizer
+from .tokenization_bert import AlbertTokenizer, BasicTokenizer, WordpieceTokenizer
 from .tokenization_utils import (PreTrainedTokenizer, clean_up_tokenization)
 
-from .modeling_bert import (BertConfig, BertModel, BertForPreTraining,
+from .modeling_bert import (AlbertConfig, BertModel, BertForPreTraining,
                        BertForMaskedLM, BertForNextSentencePrediction,
                        BertForSequenceClassification, BertForMultipleChoice,
                        BertForTokenClassification, BertForQuestionAnswering,
-                       BertForImageCaptioning, BertImgForPreTraining,
+                       AlbertForImageCaptioning, BertImgForPreTraining,
                        BertForVLGrounding, BertImgForGroundedPreTraining,
                        load_tf_weights_in_bert, BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
                        BERT_PRETRAINED_CONFIG_ARCHIVE_MAP)

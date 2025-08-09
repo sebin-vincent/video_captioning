@@ -122,12 +122,12 @@ class PretrainedConfig(object):
 
         Examples::
 
-            >>> config = BertConfig.from_pretrained('bert-base-uncased')    # Download configuration from S3 and cache.
-            >>> config = BertConfig.from_pretrained('./test/saved_model/')  # E.g. config (or model) was saved using `save_pretrained('./test/saved_model/')`
-            >>> config = BertConfig.from_pretrained('./test/saved_model/my_configuration.json')
-            >>> config = BertConfig.from_pretrained('bert-base-uncased', output_attention=True, foo=False)
+            >>> config = AlbertConfig.from_pretrained('bert-base-uncased')    # Download configuration from S3 and cache.
+            >>> config = AlbertConfig.from_pretrained('./test/saved_model/')  # E.g. config (or model) was saved using `save_pretrained('./test/saved_model/')`
+            >>> config = AlbertConfig.from_pretrained('./test/saved_model/my_configuration.json')
+            >>> config = AlbertConfig.from_pretrained('bert-base-uncased', output_attention=True, foo=False)
             >>> assert config.output_attention == True
-            >>> config, unused_kwargs = BertConfig.from_pretrained('bert-base-uncased', output_attention=True,
+            >>> config, unused_kwargs = AlbertConfig.from_pretrained('bert-base-uncased', output_attention=True,
             >>>                                                    foo=False, return_unused_kwargs=True)
             >>> assert config.output_attention == True
             >>> assert unused_kwargs == {'foo': False}
@@ -200,7 +200,7 @@ class PretrainedConfig(object):
 
     @classmethod
     def from_json_file(cls, json_file):
-        """Constructs a `BertConfig` from a json file of parameters."""
+        """Constructs a `AlbertConfig` from a json file of parameters."""
         with open(json_file, "r", encoding='utf-8') as reader:
             text = reader.read()
         return cls.from_dict(json.loads(text))
@@ -398,7 +398,7 @@ class PreTrainedModel(nn.Module):
             >>> model = BertModel.from_pretrained('bert-base-uncased', output_attention=True)  # Update configuration during loading
             >>> assert model.config.output_attention == True
             >>> # Loading from a TF checkpoint file instead of a PyTorch model (slower)
-            >>> config = BertConfig.from_json_file('./tf_model/my_tf_model_config.json')
+            >>> config = AlbertConfig.from_json_file('./tf_model/my_tf_model_config.json')
             >>> model = BertModel.from_pretrained('./tf_model/my_tf_checkpoint.ckpt.index', from_tf=True, config=config)
 
         """

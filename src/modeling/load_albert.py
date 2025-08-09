@@ -2,7 +2,7 @@ from src.layers.albert import AlbertTokenizer, AlbertConfig, AlbertForImageCapti
 from src.utils.logger import LOGGER as logger
 
 def get_albert_model(args):
-    # Load pretrained bert and tokenizer based on training configs
+    # Load pretrained albert and tokenizer based on training configs
     config_class, model_class, tokenizer_class = AlbertConfig, AlbertForImageCaptioning, AlbertTokenizer
     config = config_class.from_pretrained(args.config_name if args.config_name else \
             args.model_name_or_path, num_labels=2, finetuning_task='image_captioning')
@@ -23,7 +23,7 @@ def get_albert_model(args):
     # model_structure_changed[0] = True  # cclin hack
     for idx, param in enumerate(update_params):
         arg_param = getattr(args, param)
-        # bert-base-uncased do not have img_feature_dim
+        # albert-base-v2 do not have img_feature_dim
         config_param = getattr(config, param) if hasattr(config, param) else -1
         if arg_param > 0 and arg_param != config_param:
             logger.info(f"Update config parameter {param}: {config_param} -> {arg_param}")
@@ -37,7 +37,7 @@ def get_albert_model(args):
                 "when any of ({}) is changed.".format(', '.join(update_params[2:]))
             model = model_class.from_pretrained(args.model_name_or_path,
                 from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
-            logger.info("Load partial weights for bert layers.")
+            logger.info("Load partial weights for albert layers.")
         else:
             model = model_class(config=config) # init from scratch
             logger.info("Init model from scratch.")

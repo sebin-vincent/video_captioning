@@ -157,9 +157,9 @@ def swish(x):
 ACT2FN = {"gelu": gelu, "relu": torch.nn.functional.relu, "swish": swish}
 
 
-class BertConfig(PretrainedConfig):
+class AlbertConfig(PretrainedConfig):
     r"""
-        :class:`~pytorch_transformers.BertConfig` is the configuration class to store the configuration of a
+        :class:`~pytorch_transformers.AlbertConfig` is the configuration class to store the configuration of a
         `BertModel`.
 
 
@@ -202,7 +202,7 @@ class BertConfig(PretrainedConfig):
                  initializer_range=0.02,
                  layer_norm_eps=1e-12,
                  **kwargs):
-        super(BertConfig, self).__init__(**kwargs)
+        super(AlbertConfig, self).__init__(**kwargs)
         if isinstance(vocab_size_or_config_json_file, str) or (sys.version_info[0] == 2
                         and isinstance(vocab_size_or_config_json_file, unicode)):
             with open(vocab_size_or_config_json_file, "r", encoding='utf-8') as reader:
@@ -664,7 +664,7 @@ class BertPreTrainedModel(PreTrainedModel):
     """ An abstract class to handle weights initialization and
         a simple interface for dowloading and loading pretrained models.
     """
-    config_class = BertConfig
+    config_class = AlbertConfig
     pretrained_model_archive_map = BERT_PRETRAINED_MODEL_ARCHIVE_MAP
     load_tf_weights = load_tf_weights_in_bert
     base_model_prefix = "bert"
@@ -705,7 +705,7 @@ BERT_START_DOCSTRING = r"""    The BERT model was proposed in
         https://pytorch.org/docs/stable/nn.html#module
 
     Parameters:
-        config (:class:`~pytorch_transformers.BertConfig`): Model configuration class with all the parameters of the model.
+        config (:class:`~pytorch_transformers.AlbertConfig`): Model configuration class with all the parameters of the model.
 """
 
 BERT_INPUTS_DOCSTRING = r"""
@@ -726,7 +726,7 @@ BERT_INPUTS_DOCSTRING = r"""
 
                 ``token_type_ids:   0   0   0   0  0     0   0``
 
-            Indices can be obtained using :class:`pytorch_transformers.BertTokenizer`.
+            Indices can be obtained using :class:`pytorch_transformers.AlbertTokenizer`.
             See :func:`pytorch_transformers.PreTrainedTokenizer.encode` and
             :func:`pytorch_transformers.PreTrainedTokenizer.convert_tokens_to_ids` for details.
         **position_ids**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size, sequence_length)``:
@@ -771,8 +771,8 @@ class BertModel(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>> model = BertModel(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
         >>> outputs = model(input_ids)
@@ -852,7 +852,7 @@ class BertModel(BertPreTrainedModel):
         return outputs  # sequence_output, pooled_output, (hidden_states), (attentions)
 
 
-class BertImgModel(BertPreTrainedModel):
+class AlbertImgModel(BertPreTrainedModel):
     r"""
     Outputs: `Tuple` comprising various elements depending on the configuration (config) and inputs:
         **last_hidden_state**: ``torch.FloatTensor`` of shape ``(batch_size, sequence_length, hidden_size)``
@@ -874,8 +874,8 @@ class BertImgModel(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>> model = BertModel(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
         >>> outputs = model(input_ids)
@@ -883,14 +883,14 @@ class BertImgModel(BertPreTrainedModel):
 
     """
     def __init__(self, config):
-        super(BertImgModel, self).__init__(config)
+        super(AlbertImgModel, self).__init__(config)
 
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
 
         self.img_dim = config.img_feature_dim #2054 #565
-        logger.info('BertImgModel Image Dimension: {}'.format(self.img_dim))
+        logger.info('AlbertImgModel Image Dimension: {}'.format(self.img_dim))
         self.img_feature_type = config.img_feature_type
         try:
             self.use_img_layernorm = config.use_img_layernorm
@@ -1062,8 +1062,8 @@ class LangImgModel(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>> model = BertModel(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
         >>> outputs = model(input_ids)
@@ -1193,8 +1193,8 @@ class BertForPreTraining(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForPreTraining(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -1268,8 +1268,8 @@ class BertImgForPreTraining(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForPreTraining(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -1281,7 +1281,7 @@ class BertImgForPreTraining(BertPreTrainedModel):
         super(BertImgForPreTraining, self).__init__(config)
 
         #self.bert = BertModel(config) # original BERT
-        self.bert = BertImgModel(config)
+        self.bert = AlbertImgModel(config)
         self.cls = BertPreTrainingHeads(config)
         self.num_seq_relations = config.num_contrast_classes if hasattr(config, "num_contrast_classes") else 2
 
@@ -1341,8 +1341,8 @@ class BertForMaskedLM(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForMaskedLM(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -1408,8 +1408,8 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForNextSentencePrediction(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -1477,8 +1477,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForSequenceClassification(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -1494,7 +1494,7 @@ class BertForSequenceClassification(BertPreTrainedModel):
         self.config = config
 
         #self.bert = BertModel(config) # original BERT
-        self.bert = BertImgModel(config) # baseline 1
+        self.bert = AlbertImgModel(config) # baseline 1
 
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
@@ -1636,14 +1636,14 @@ class BertImgFeatureLoss(nn.Module):
 
 @add_start_docstrings("""Bert Model transformer for image captioning""",
     BERT_START_DOCSTRING)
-class BertForImageCaptioning(BertPreTrainedModel):
+class AlbertForImageCaptioning(BertPreTrainedModel):
     r"""
     Bert for Image Captioning.
     """
     def __init__(self, config):
-        super(BertForImageCaptioning, self).__init__(config)
+        super(AlbertForImageCaptioning, self).__init__(config)
         self.config = config
-        self.bert = BertImgModel(config)
+        self.bert = AlbertImgModel(config)
         self.cls = BertCaptioningHeads(config)
         self.loss = BertCaptioningLoss(config)
         # cclin
@@ -1655,7 +1655,7 @@ class BertForImageCaptioning(BertPreTrainedModel):
 
         self.model_type = getattr(config, 'model_type', 'bert')
         if self.model_type == 'TIMM_vit':
-            self.bert = BertImgModel(config)
+            self.bert = AlbertImgModel(config)
 
     def tie_weights(self):
         if hasattr(self.config, 'tie_weights') and self.config.tie_weights:
@@ -2244,7 +2244,7 @@ class BertForMultipleChoice(BertPreTrainedModel):
 
                 ``token_type_ids:   0   0   0   0  0     0   0``
 
-            Indices can be obtained using :class:`pytorch_transformers.BertTokenizer`.
+            Indices can be obtained using :class:`pytorch_transformers.AlbertTokenizer`.
             See :func:`pytorch_transformers.PreTrainedTokenizer.encode` and
             :func:`pytorch_transformers.PreTrainedTokenizer.convert_tokens_to_ids` for details.
         **token_type_ids**: (`optional`) ``torch.LongTensor`` of shape ``(batch_size, num_choices, sequence_length)``:
@@ -2283,8 +2283,8 @@ class BertForMultipleChoice(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForMultipleChoice(config)
         >>> choices = ["Hello, my dog is cute", "Hello, my cat is amazing"]
@@ -2353,8 +2353,8 @@ class BertForTokenClassification(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForTokenClassification(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -2429,8 +2429,8 @@ class BertForQuestionAnswering(BertPreTrainedModel):
 
     Examples::
 
-        >>> config = BertConfig.from_pretrained('bert-base-uncased')
-        >>> tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        >>> config = AlbertConfig.from_pretrained('bert-base-uncased')
+        >>> tokenizer = AlbertTokenizer.from_pretrained('bert-base-uncased')
         >>>
         >>> model = BertForQuestionAnswering(config)
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute")).unsqueeze(0)  # Batch size 1
@@ -2492,7 +2492,7 @@ class BertForVLGrounding(BertPreTrainedModel):
     def __init__(self, config):
         super(BertForVLGrounding, self).__init__(config)
         self.attention_head_size = config.hidden_size // config.num_attention_heads
-        self.bert = BertImgModel(config)
+        self.bert = AlbertImgModel(config)
         self.query_layer = nn.Linear(config.hidden_size, self.attention_head_size)
         self.key_layer = nn.Linear(config.hidden_size, self.attention_head_size)
 
