@@ -322,16 +322,36 @@ class AlbertAttention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(self, input_tensor, attention_mask=None, head_mask=None):
+        # DEBUG: Print input tensor shape
+        print(f"🔍 AlbertSelfAttention.forward() DEBUG:")
+        print(f"  input_tensor.shape: {input_tensor.shape}")
+        if attention_mask is not None:
+            print(f"  attention_mask.shape: {attention_mask.shape}")
+        if head_mask is not None:
+            print(f"  head_mask.shape: {head_mask.shape}")
+        
         mixed_query_layer = self.query(input_tensor)
         mixed_key_layer = self.key(input_tensor)
         mixed_value_layer = self.value(input_tensor)
+        
+        print(f"  After linear projections:")
+        print(f"    mixed_query_layer.shape: {mixed_query_layer.shape}")
+        print(f"    mixed_key_layer.shape: {mixed_key_layer.shape}")
+        print(f"    mixed_value_layer.shape: {mixed_value_layer.shape}")
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
+        
+        print(f"  After transpose_for_scores:")
+        print(f"    query_layer.shape: {query_layer.shape}")
+        print(f"    key_layer.shape: {key_layer.shape}")
+        print(f"    value_layer.shape: {value_layer.shape}")
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        print(f"  attention_scores.shape: {attention_scores.shape}")
+        
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         # Apply the attention mask is (precomputed for all layers in AlbertModel forward() function)
         if attention_mask is not None:
@@ -339,6 +359,7 @@ class AlbertAttention(nn.Module):
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        print(f"  attention_probs.shape: {attention_probs.shape}")
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -351,8 +372,17 @@ class AlbertAttention(nn.Module):
             # Skip head_mask processing to avoid dimension issues
 
         context_layer = torch.matmul(attention_probs, value_layer)
+        print(f"  context_layer.shape BEFORE permute: {context_layer.shape}")
+        print(f"  context_layer.dim(): {context_layer.dim()}")
 
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        try:
+            context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+            print(f"  ✅ Permute successful! context_layer.shape AFTER permute: {context_layer.shape}")
+        except Exception as e:
+            print(f"  ❌ PERMUTE FAILED: {e}")
+            print(f"  Expected: 4D tensor for permute(0, 2, 1, 3)")
+            print(f"  Got: {context_layer.dim()}D tensor with shape {context_layer.shape}")
+            raise e
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
