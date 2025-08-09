@@ -41,8 +41,10 @@ class VideoTransformer(torch.nn.Module):
         vid_feats = self.fc(vid_feats)
         # prepare VL transformer inputs
         kwargs['img_feats'] = vid_feats
-        if self.trans_encoder.bert.encoder.output_attentions:
-            self.trans_encoder.bert.encoder.set_output_attentions(False)
+        # Handle both BERT and ALBERT models
+        encoder_model = getattr(self.trans_encoder, 'bert', None) or getattr(self.trans_encoder, 'albert', None)
+        if encoder_model and encoder_model.encoder.output_attentions:
+            encoder_model.encoder.set_output_attentions(False)
         # learn soft attention mask
         if self.learn_mask_enabled:
             kwargs['attention_mask'] = kwargs['attention_mask'].float()
