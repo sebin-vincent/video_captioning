@@ -479,6 +479,19 @@ class AlbertPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
         if isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
+    
+    def init_weights(self, module):
+        """ Initialize the weights.
+        """
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            # Slightly different from the TF version which uses truncated_normal for initialization
+            # cf https://github.com/pytorch/pytorch/pull/5617
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+        elif isinstance(module, AlbertLayerNorm) or isinstance(module, LayerNormClass):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        if isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
 
 
 class AlbertModel(AlbertPreTrainedModel):
@@ -510,7 +523,7 @@ class AlbertModel(AlbertPreTrainedModel):
         self.pooler = nn.Linear(config.hidden_size, config.hidden_size)
         self.pooler_activation = nn.Tanh()
 
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -623,7 +636,7 @@ class AlbertForPreTraining(AlbertPreTrainedModel):
         self.predictions = AlbertMLMHead(config, self.albert.embeddings.word_embeddings.weight)
         self.sop_classifier = AlbertSOPHead(config)
 
-        self.init_weights()
+        self.apply(self.init_weights)
         self.tie_weights()
 
     def tie_weights(self):
@@ -665,7 +678,7 @@ class AlbertForMaskedLM(AlbertPreTrainedModel):
         self.albert = AlbertModel(config)
         self.predictions = AlbertMLMHead(config, self.albert.embeddings.word_embeddings.weight)
 
-        self.init_weights()
+        self.apply(self.init_weights)
         self.tie_weights()
 
     def tie_weights(self):
@@ -702,7 +715,7 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, self.config.num_labels)
 
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, labels=None):
@@ -741,7 +754,7 @@ class AlbertForMultipleChoice(AlbertPreTrainedModel):
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
 
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, labels=None):
@@ -785,7 +798,7 @@ class AlbertForTokenClassification(AlbertPreTrainedModel):
         self.dropout = nn.Dropout(config.classifier_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, labels=None):
@@ -827,7 +840,7 @@ class AlbertForQuestionAnswering(AlbertPreTrainedModel):
         self.albert = AlbertModel(config)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, start_positions=None, end_positions=None):
@@ -937,7 +950,7 @@ class AlbertImgModel(AlbertPreTrainedModel):
             if self.use_img_layernorm:
                 self.LayerNorm = LayerNormClass(config.hidden_size, eps=config.img_layer_norm_eps)
 
-        self.init_weights()
+        self.apply(self.init_weights)
         self.model_type = getattr(config, 'model_type', 'albert')
 
         # re-initialize img_embedding weight
@@ -1115,7 +1128,7 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
         self.cls_img_feat = AlbertIFPredictionHead(config)
         self.loss_img_feat = AlbertImgFeatureLoss(config)
 
-        self.init_weights()
+        self.apply(self.init_weights)
         self.tie_weights()
 
         self.model_type = getattr(config, 'model_type', 'albert')
@@ -1213,7 +1226,7 @@ class AlbertForNextSentencePrediction(AlbertPreTrainedModel):
         super(AlbertForNextSentencePrediction, self).__init__(config)
         self.albert = AlbertModel(config)
         self.sop_classifier = AlbertSOPHead(config)
-        self.init_weights()
+        self.apply(self.init_weights)
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, position_ids=None, head_mask=None,
                 inputs_embeds=None, labels=None):
