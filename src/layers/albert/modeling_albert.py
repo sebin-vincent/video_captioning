@@ -289,6 +289,7 @@ class AlbertAttention(nn.Module):
 
         self.attention_dropout = nn.Dropout(config.attention_probs_dropout_prob)
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.LayerNorm = AlbertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.pruned_heads = set()
 
@@ -345,6 +346,12 @@ class AlbertAttention(nn.Module):
 
         # Mask heads if we want to
         if head_mask is not None:
+            # Ensure head_mask has the right dimensions for attention_probs
+            # attention_probs shape: (batch_size, num_heads, seq_len, seq_len)
+            # head_mask should be broadcastable to this shape
+            if head_mask.dim() == 5:
+                # If head_mask has an extra layer dimension, remove it
+                head_mask = head_mask.squeeze(0)
             attention_probs = attention_probs * head_mask
 
         context_layer = torch.matmul(attention_probs, value_layer)
