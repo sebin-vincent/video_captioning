@@ -516,6 +516,7 @@ def get_custom_args(base_config):
                         help="-1: random init, 0: random init and then diag-based copy, 1: interpolation")
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
+    parser.add_argument('--model_type', type=str, default='bert', help="Model type: bert or albert")
     args = base_config.parse_args()
     return args
 
