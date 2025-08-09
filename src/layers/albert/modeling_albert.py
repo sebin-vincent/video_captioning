@@ -145,6 +145,7 @@ class AlbertConfig(PretrainedConfig):
         layer_norm_eps=1e-12,
         classifier_dropout_prob=0.1,
         chunk_size_feed_forward=0,
+        is_decoder=False,
         pad_token_id=0,
         bos_token_id=2,
         eos_token_id=3,
@@ -169,6 +170,7 @@ class AlbertConfig(PretrainedConfig):
         self.layer_norm_eps = layer_norm_eps
         self.classifier_dropout_prob = classifier_dropout_prob
         self.chunk_size_feed_forward = chunk_size_feed_forward
+        self.is_decoder = is_decoder
 
 class AlbertEmbeddings(nn.Module):
     """
