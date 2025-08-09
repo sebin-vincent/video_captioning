@@ -936,19 +936,19 @@ class AlbertImgModel(AlbertPreTrainedModel):
 
         if config.img_feature_type == 'dis_code':
             self.code_embeddings = nn.Embedding(config.code_voc, config.code_dim, padding_idx=0)
-            self.img_embedding = nn.Linear(config.code_dim, self.config.hidden_size, bias=True)
+            self.img_embedding = nn.Linear(config.code_dim, self.config.embedding_size, bias=True)
         elif config.img_feature_type == 'dis_code_t': # transpose
             self.code_embeddings = nn.Embedding(config.code_voc, config.code_dim, padding_idx=0)
-            self.img_embedding = nn.Linear(config.code_size, self.config.hidden_size, bias=True)
+            self.img_embedding = nn.Linear(config.code_size, self.config.embedding_size, bias=True)
         elif config.img_feature_type == 'dis_code_scale': # scaled
             self.input_embeddings = nn.Linear(config.code_dim, config.code_size, bias=True)
             self.code_embeddings = nn.Embedding(config.code_voc, config.code_dim, padding_idx=0)
-            self.img_embedding = nn.Linear(config.code_dim, self.config.hidden_size, bias=True)
+            self.img_embedding = nn.Linear(config.code_dim, self.config.embedding_size, bias=True)
         else:
-            self.img_embedding = nn.Linear(self.img_dim, self.config.hidden_size, bias=True)
+            self.img_embedding = nn.Linear(self.img_dim, self.config.embedding_size, bias=True)
             self.dropout = nn.Dropout(config.hidden_dropout_prob)
             if self.use_img_layernorm:
-                self.LayerNorm = LayerNormClass(config.hidden_size, eps=config.img_layer_norm_eps)
+                self.LayerNorm = LayerNormClass(config.embedding_size, eps=config.img_layer_norm_eps)
 
         self.apply(self.init_weights)
         self.model_type = getattr(config, 'model_type', 'albert')
