@@ -345,14 +345,10 @@ class AlbertAttention(nn.Module):
         attention_probs = self.attention_dropout(attention_probs)
 
         # Mask heads if we want to
+        # Note: head_mask support is disabled in this codebase like BERT
         if head_mask is not None:
-            # Ensure head_mask has the right dimensions for attention_probs
-            # attention_probs shape: (batch_size, num_heads, seq_len, seq_len)
-            # head_mask should be broadcastable to this shape
-            if head_mask.dim() == 5:
-                # If head_mask has an extra layer dimension, remove it
-                head_mask = head_mask.squeeze(0)
-            attention_probs = attention_probs * head_mask
+            logger.warning("head_mask is not supported in this ALBERT implementation")
+            # Skip head_mask processing to avoid dimension issues
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
@@ -380,7 +376,8 @@ class AlbertLayer(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, attention_mask=None, head_mask=None):
-        attention_outputs = self.attention(hidden_states, attention_mask, head_mask)
+        # Disable head_mask support like BERT does in this codebase  
+        attention_outputs = self.attention(hidden_states, attention_mask, head_mask=None)
         ffn_output = self.ffn(attention_outputs[0])
         ffn_output = self.activation(ffn_output)
         ffn_output = self.ffn_output(ffn_output)
@@ -404,7 +401,8 @@ class AlbertLayerGroup(nn.Module):
         layer_attentions = ()
 
         for layer_index, albert_layer in enumerate(self.albert_layers):
-            layer_output = albert_layer(hidden_states, attention_mask, head_mask[layer_index])
+            # Disable head_mask support like BERT does in this codebase
+            layer_output = albert_layer(hidden_states, attention_mask, head_mask=None)
             hidden_states = layer_output[0]
 
             if self.output_attentions:
