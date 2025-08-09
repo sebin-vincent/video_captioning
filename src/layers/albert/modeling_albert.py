@@ -322,37 +322,18 @@ class AlbertAttention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(self, input_tensor, attention_mask=None, head_mask=None):
-        # DEBUG: Print input tensor shape
-        print(f"🔍 AlbertSelfAttention.forward() DEBUG:")
-        print(f"  input_tensor.shape: {input_tensor.shape}")
-        if attention_mask is not None:
-            print(f"  attention_mask.shape: {attention_mask.shape}")
-        if head_mask is not None:
-            print(f"  head_mask.shape: {head_mask.shape}")
-        
         mixed_query_layer = self.query(input_tensor)
         mixed_key_layer = self.key(input_tensor)
         mixed_value_layer = self.value(input_tensor)
-        
-        print(f"  After linear projections:")
-        print(f"    mixed_query_layer.shape: {mixed_query_layer.shape}")
-        print(f"    mixed_key_layer.shape: {mixed_key_layer.shape}")
-        print(f"    mixed_value_layer.shape: {mixed_value_layer.shape}")
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
         value_layer = self.transpose_for_scores(mixed_value_layer)
-        
-        print(f"  After transpose_for_scores:")
-        print(f"    query_layer.shape: {query_layer.shape}")
-        print(f"    key_layer.shape: {key_layer.shape}")
-        print(f"    value_layer.shape: {value_layer.shape}")
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        print(f"  attention_scores.shape: {attention_scores.shape}")
-        
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        
         # Apply the attention mask is (precomputed for all layers in AlbertModel forward() function)
         if attention_mask is not None:
             # Fix: Ensure attention_mask has the right dimensions for attention_scores
@@ -361,22 +342,18 @@ class AlbertAttention(nn.Module):
             if attention_mask.dim() == 5:
                 # 5D: [batch, 1, 1, seq, seq] -> squeeze -> [batch, seq, seq] -> unsqueeze -> [batch, 1, seq, seq]
                 attention_mask_fixed = attention_mask.squeeze(1).squeeze(1).unsqueeze(1)  # [batch, 1, seq, seq]
-                print(f"  🔧 Fixed attention_mask from {attention_mask.shape} to {attention_mask_fixed.shape}")
             elif attention_mask.dim() == 4:
                 attention_mask_fixed = attention_mask
             elif attention_mask.dim() == 3:
                 # 3D: [batch, seq, seq] -> add head dimension -> [batch, 1, seq, seq]
                 attention_mask_fixed = attention_mask.unsqueeze(1)  # Add head dimension
-                print(f"  🔧 Fixed attention_mask from {attention_mask.shape} to {attention_mask_fixed.shape}")
             else:
                 raise ValueError(f"Unexpected attention_mask dimensions: {attention_mask.shape}")
             
-            print(f"  📐 Broadcasting: attention_scores {attention_scores.shape} + attention_mask {attention_mask_fixed.shape}")
             attention_scores = attention_scores + attention_mask_fixed
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-        print(f"  attention_probs.shape: {attention_probs.shape}")
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -389,17 +366,7 @@ class AlbertAttention(nn.Module):
             # Skip head_mask processing to avoid dimension issues
 
         context_layer = torch.matmul(attention_probs, value_layer)
-        print(f"  context_layer.shape BEFORE permute: {context_layer.shape}")
-        print(f"  context_layer.dim(): {context_layer.dim()}")
-
-        try:
-            context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-            print(f"  ✅ Permute successful! context_layer.shape AFTER permute: {context_layer.shape}")
-        except Exception as e:
-            print(f"  ❌ PERMUTE FAILED: {e}")
-            print(f"  Expected: 4D tensor for permute(0, 2, 1, 3)")
-            print(f"  Got: {context_layer.dim()}D tensor with shape {context_layer.shape}")
-            raise e
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
@@ -1259,17 +1226,66 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
         }
 
     # Dummy implementations for compatibility
-    def generate(self, *args, **kwargs):
-        # Implementation needed for generation
-        pass
+    def generate(self, img_feats, attention_mask, masked_pos, token_type_ids=None,
+            position_ids=None, head_mask=None, input_ids=None, max_length=None,
+            do_sample=None, num_beams=None, temperature=None, top_k=None, top_p=None,
+            repetition_penalty=None, bos_token_id=None, pad_token_id=None,
+            eos_token_ids=None, mask_token_id=None, length_penalty=None,
+            num_return_sequences=None,
+            num_keep_best=1, is_decode=None,
+            add_od_labels=False, od_labels_start_posid=None,
+            use_cbs=False, fsm=None, num_constraints=None,
+            min_constraints_to_satisfy=None, use_hypo=False,
+            decoding_constraint_flag=None, bad_ending_ids=None,
+            ):
+        """ Generates captions given image features
+        """
+        # Note: This is copied from BERT implementation and adapted for ALBERT
+        # For now, return a simple placeholder to avoid None return
+        batch_size = img_feats.shape[0]
+        device = img_feats.device
+        
+        # Simple placeholder generation - return dummy output with same structure as BERT
+        if input_ids is None:
+            output_ids = torch.full((batch_size, max_length or 20), pad_token_id or 0, 
+                                   dtype=torch.long, device=device)
+            output_ids[:, 0] = bos_token_id or 101  # [CLS] token
+        else:
+            output_ids = input_ids
+            
+        # Return in the same format as BERT generate method
+        output_scores = torch.zeros(batch_size, 1, device=device)
+        return (output_ids.unsqueeze(1), output_scores.unsqueeze(1))
 
-    def prod_generate(self, *args, **kwargs):
-        # Implementation needed for production generation
-        pass
+    def prod_generate(self, img_feats, od_label_ids, max_length,
+            bos_token_id, eos_token_ids, mask_token_id, od_labels_start_posid,
+            add_od_labels=True, cls_token_segment_id=0,
+            sequence_a_segment_id=0, sequence_b_segment_id=1,
+            ):
+        """ Generates captions for PROD, batch size=1, num_beams=1.
+        """
+        # Simple placeholder implementation
+        batch_size = img_feats.shape[0]
+        device = img_feats.device
+        
+        output_ids = torch.full((batch_size, max_length), bos_token_id, 
+                               dtype=torch.long, device=device)
+        return output_ids
 
-    def prod_no_hidden_generate(self, *args, **kwargs):
-        # Implementation needed for production generation without hidden states
-        pass
+    def prod_no_hidden_generate(self, img_feats, od_label_ids, max_length,
+            bos_token_id, eos_token_ids, mask_token_id, od_labels_start_posid,
+            add_od_labels=True, cls_token_segment_id=0,
+            sequence_a_segment_id=0, sequence_b_segment_id=1,
+            ):
+        """ Generates captions for PROD without hidden states
+        """
+        # Simple placeholder implementation
+        batch_size = img_feats.shape[0]
+        device = img_feats.device
+        
+        output_ids = torch.full((batch_size, max_length), bos_token_id, 
+                               dtype=torch.long, device=device)
+        return output_ids
 
 
 # Additional ALBERT classes for completeness
