@@ -1,6 +1,6 @@
 {
   "architectures": [
-    "BertForMaskedLM"
+    "AlbertForImageCaptioning"
   ],
   "attention_probs_dropout_prob": 0.1,
   "hidden_act": "gelu_new",
@@ -17,5 +17,12 @@
   "embedding_size": 128,
   "num_hidden_groups": 1,
   "inner_group_num": 1,
-  "classifier_dropout_prob": 0.1
+  "classifier_dropout_prob": 0.1,
+  "output_attentions": false,
+  "output_hidden_states": false,
+  "layer_norm_eps": 1e-12,
+  "img_feature_dim": 512,
+  "img_feature_type": "frcnn",
+  "use_img_layernorm": true,
+  "img_layer_norm_eps": 1e-12
 }
