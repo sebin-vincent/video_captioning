@@ -635,7 +635,7 @@ class AlbertModel(AlbertPreTrainedModel):
             self.pooler = None
 
         # Initialize weights and apply final processing
-        self.init_weights()
+        self.apply(self._init_weights)
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -775,7 +775,7 @@ class AlbertImgModel(AlbertPreTrainedModel):
             if self.use_img_layernorm:
                 self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.img_layer_norm_eps)
 
-        self.init_weights()
+        self.apply(self._init_weights)
 
     def _resize_token_embeddings(self, new_num_tokens):
         old_embeddings = self.embeddings.word_embeddings
