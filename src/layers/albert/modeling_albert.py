@@ -1245,19 +1245,23 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
             min_constraints_to_satisfy=None, use_hypo=False,
             decoding_constraint_flag=None, bad_ending_ids=None,
             ):
-        """ Generates captions given image features - Simplified ALBERT version
+        """ Generates captions given image features - Fixed ALBERT version
         """
         assert is_decode
         batch_size = img_feats.shape[0]
         device = img_feats.device
+        img_seq_len = img_feats.shape[1]
         
-        # Simple greedy generation approach
+        # Initialize with BOS token
         curr_ids = torch.full((batch_size, 1), bos_token_id, dtype=torch.long, device=device)
         logprobs = []
         
+        # Set up repetition penalty tracking
+        if repetition_penalty and repetition_penalty != 1.0:
+            token_counts = {}
+        
         for step in range(max_length - 1):
-            # Create input for current step
-            input_len = curr_ids.shape[1]
+            current_seq_len = curr_ids.shape[1]
             
             # Add mask token for next prediction
             input_ids_with_mask = torch.cat([
@@ -1265,16 +1269,35 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
                 torch.full((batch_size, 1), mask_token_id, dtype=torch.long, device=device)
             ], dim=1)
             
-            # Create attention mask - simple causal mask
-            seq_len = input_ids_with_mask.shape[1] + img_feats.shape[1]
-            attn_mask = torch.ones((batch_size, seq_len, seq_len), device=device)
+            # Create proper attention mask that allows attention to all previous tokens and image
+            total_seq_len = input_ids_with_mask.shape[1]
+            text_img_len = total_seq_len + img_seq_len
+            
+            # Create causal attention mask: each position can attend to itself and all previous positions
+            attn_mask = torch.zeros((batch_size, text_img_len, text_img_len), device=device)
+            
+            # Image features can attend to all image features
+            attn_mask[:, :img_seq_len, :img_seq_len] = 1
+            
+            # Text tokens can attend to all image features
+            attn_mask[:, img_seq_len:, :img_seq_len] = 1
+            
+            # Text tokens can attend to previous text tokens (causal mask)
+            for i in range(total_seq_len):
+                attn_mask[:, img_seq_len + i, img_seq_len:img_seq_len + i + 1] = 1
+            
+            # Convert to attention scores (0 -> 0, 1 -> -10000 for masking)
             attn_mask = (1.0 - attn_mask) * -10000.0
             
-            # Create other required inputs
-            token_types = torch.zeros_like(input_ids_with_mask)
-            positions = torch.arange(input_ids_with_mask.shape[1], device=device).unsqueeze(0).expand(batch_size, -1)
-            mask_pos = torch.zeros_like(input_ids_with_mask)
-            mask_pos[:, -1] = 1  # Only mask the last (newly added) position
+            # Create token type IDs
+            token_types = torch.zeros((batch_size, total_seq_len), dtype=torch.long, device=device)
+            
+            # Create position IDs
+            positions = torch.arange(total_seq_len, device=device).unsqueeze(0).expand(batch_size, -1)
+            
+            # Create masked positions - only mask the last token
+            mask_pos = torch.zeros((batch_size, total_seq_len), dtype=torch.long, device=device)
+            mask_pos[:, -1] = 1
             
             # Forward pass
             outputs = self.encode_forward(
@@ -1287,50 +1310,82 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
                 is_training=False
             )
             
-            # Get prediction for the masked position
-            # The outputs should be (logits,) when is_training=False
+            # Get logits for the masked position
             if isinstance(outputs, tuple):
-                logits = outputs[0]  # Should be (batch_size, seq_len, vocab_size)
+                logits = outputs[0]  # (batch_size, seq_len, vocab_size)
             else:
                 logits = outputs
                 
             # Get logits for the last position (the masked token)
             next_token_logits = logits[:, -1, :]  # (batch_size, vocab_size)
             
-            # Apply sampling strategy
-            if do_sample and temperature != 1.0:
+            # Apply repetition penalty to reduce repetitive generation
+            # Use a stronger default repetition penalty if not specified
+            if repetition_penalty is None or repetition_penalty == 1:
+                repetition_penalty = 1.2  # Default anti-repetition penalty
+                
+            if repetition_penalty != 1.0:
+                for batch_idx in range(batch_size):
+                    for prev_token in curr_ids[batch_idx].tolist():
+                        if prev_token in [bos_token_id, pad_token_id, mask_token_id]:
+                            continue  # Skip special tokens
+                        # Apply penalty to previously generated tokens
+                        if next_token_logits[batch_idx, prev_token] < 0:
+                            next_token_logits[batch_idx, prev_token] *= repetition_penalty
+                        else:
+                            next_token_logits[batch_idx, prev_token] /= repetition_penalty
+            
+            # Apply temperature
+            if do_sample and temperature and temperature != 1.0:
                 next_token_logits = next_token_logits / temperature
             
+            # Apply top-k/top-p filtering
             if do_sample and (top_k > 0 or top_p < 1.0):
-                # Apply top-k/top-p filtering if needed
                 try:
                     from .modeling_utils import top_k_top_p_filtering
                     next_token_logits = top_k_top_p_filtering(next_token_logits, top_k=top_k, top_p=top_p)
                 except ImportError:
-                    pass  # Fallback to regular sampling
+                    pass
             
+            # Sample or select next token
             if do_sample:
-                # Sample next token
                 probs = F.softmax(next_token_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1).squeeze(1)
             else:
-                # Greedy selection
                 next_token = torch.argmax(next_token_logits, dim=-1)
+            
+            # Debug: Check for repetitive tokens (only for first batch item)
+            if step > 2 and batch_size > 0:
+                recent_tokens = curr_ids[0, -3:].tolist() if curr_ids.shape[1] >= 3 else curr_ids[0].tolist()
+                if len(set(recent_tokens)) == 1 and recent_tokens[0] == next_token[0].item():
+                    # If same token repeated 3+ times, force selection of different token
+                    next_token_logits[0, next_token[0].item()] = -float('inf')
+                    if do_sample:
+                        probs = F.softmax(next_token_logits, dim=-1)
+                        next_token[0] = torch.multinomial(probs[0:1], num_samples=1).squeeze()
+                    else:
+                        next_token[0] = torch.argmax(next_token_logits[0])
             
             # Compute log probabilities for scoring
             log_probs = F.log_softmax(next_token_logits, dim=-1)
             token_log_prob = torch.gather(log_probs, -1, next_token.unsqueeze(-1))
             logprobs.append(token_log_prob)
             
-            # Check for EOS tokens
-            is_eos = torch.any(torch.stack([next_token == eos_id for eos_id in eos_token_ids]), dim=0)
-            if torch.all(is_eos):
-                # Add EOS token and break
+            # Check for EOS tokens - stop if all sequences hit EOS
+            if eos_token_ids:
+                is_eos = torch.zeros(batch_size, dtype=torch.bool, device=device)
+                for eos_id in eos_token_ids:
+                    is_eos |= (next_token == eos_id)
+                
+                # Add the token first
                 curr_ids = torch.cat([curr_ids, next_token.unsqueeze(-1)], dim=-1)
-                break
-            
-            # Add predicted token to sequence
-            curr_ids = torch.cat([curr_ids, next_token.unsqueeze(-1)], dim=-1)
+                
+                # If all sequences hit EOS, break
+                if torch.all(is_eos):
+                    break
+            else:
+                # Add predicted token to sequence
+                curr_ids = torch.cat([curr_ids, next_token.unsqueeze(-1)], dim=-1)
         
         # Pad to max_length if needed
         if curr_ids.shape[1] < max_length:
@@ -1401,70 +1456,37 @@ class AlbertForImageCaptioning(AlbertPreTrainedModel):
         """
         assert self.num_keep_best == 1, 'cannot generate >1 sentences in greedy search'
         
-        # Simplified generation using the existing ALBERT infrastructure
-        # Get image features from the stored attributes
+        # Use the main generate method which has the fixed logic
+        # This method is called by the framework, so we redirect to the fixed implementation
+        
+        # Get image features from stored attributes
         img_feats = self.img_feats
+        device = input_ids.device
         
-        # Simple greedy generation without complex past handling
-        curr_ids = input_ids.clone()
-        logprobs = []
+        # Create dummy inputs that match what generate() expects
+        attention_mask = torch.ones((batch_size, max_length + img_feats.shape[1], max_length + img_feats.shape[1]), device=device)
+        masked_pos = torch.zeros((batch_size, max_length), device=device)
         
-        for step in range(max_length - cur_len):
-            # Prepare inputs using the existing method
-            model_inputs = self.prepare_inputs_for_generation(
-                curr_ids, 
-                past=None,
-                img_feats=img_feats,
-                mask_token_id=self.mask_token_id,
-                use_cache=False,
-                do_sample=do_sample,
-                num_beams=1
-            )
-            
-            # Forward pass
-            outputs = self.encode_forward(**model_inputs)
-            
-            # Get logits for the last position
-            logits = outputs[0][:, -1, :]  # (batch_size, vocab_size)
-            
-            if do_sample:
-                # Temperature and sampling
-                if temperature != 1.0:
-                    logits = logits / temperature
-                if top_k > 0 or top_p < 1.0:
-                    from .modeling_utils import top_k_top_p_filtering
-                    logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
-                next_token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).squeeze(1)
-            else:
-                # Greedy decoding
-                next_token = torch.argmax(logits, dim=-1)
-            
-            # Compute scores
-            _scores = F.log_softmax(logits, dim=-1)
-            _scores = torch.gather(_scores, -1, next_token.unsqueeze(-1))
-            logprobs.append(_scores)
-            
-            # Append new token
-            curr_ids = torch.cat([curr_ids, next_token.unsqueeze(-1)], dim=-1)
-            
-            # Check for EOS tokens
-            if any(next_token.item() == eos_id for eos_id in eos_token_ids):
-                break
+        # Call the fixed generate method
+        outputs = self.generate(
+            img_feats=img_feats,
+            attention_mask=attention_mask,
+            masked_pos=masked_pos,
+            input_ids=None,  # Will be initialized in generate()
+            max_length=max_length,
+            do_sample=do_sample,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            bos_token_id=input_ids[0, 0].item(),  # Use first token as BOS
+            pad_token_id=pad_token_id,
+            eos_token_ids=eos_token_ids,
+            mask_token_id=self.mask_token_id,
+            is_decode=True
+        )
         
-        # Pad to max_length if needed
-        if curr_ids.shape[1] < max_length:
-            padding = torch.full((batch_size, max_length - curr_ids.shape[1]), 
-                               pad_token_id, dtype=torch.long, device=curr_ids.device)
-            curr_ids = torch.cat([curr_ids, padding], dim=1)
-        
-        # Calculate average log probability
-        if logprobs:
-            logprobs = torch.cat(logprobs, dim=1).mean(dim=1)
-        else:
-            logprobs = torch.zeros(batch_size, device=curr_ids.device)
-        
-        # (batch_size, n_best, max_len), (batch_size, n_best)
-        return curr_ids.unsqueeze(1), logprobs.unsqueeze(1)
+        return outputs
 
     def _generate_beam_search(
         self,
