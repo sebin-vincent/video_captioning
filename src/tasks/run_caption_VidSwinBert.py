@@ -156,6 +156,11 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
         }
 
         if iteration == 1:
+            logger.info(f'image_keys = {img_keys}')
+            logger.info(f'input_ids = {batch[0]}')
+            logger.info(f'token_type_ids = {batch[2]}')
+            logger.info(f'masked_pos = {batch[4]}')
+            logger.info(f'masked_ids = {batch[5]}')
             for k, v in inputs.items():
                 logger.info(f'{k} = {v.shape}')
 
