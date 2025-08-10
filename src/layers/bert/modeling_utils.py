@@ -782,7 +782,6 @@ class PreTrainedModel(nn.Module):
         """ Generate sequences for each example without beam search (num_beams == 1).
             All returned sequence are generated independantly.
         """
-        print("Calling no beam search")
         assert self.num_keep_best == 1, 'cannot generate >1 sentences in greedy search'
         # current position / max lengths / length of generated sentences / unfinished sentences
         unfinished_sents = []
