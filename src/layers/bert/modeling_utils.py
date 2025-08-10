@@ -533,9 +533,6 @@ class PreTrainedModel(nn.Module):
 
         return model
 
-    def prepare_inputs_for_generation(self, input_ids, **kwargs):
-        return {"input_ids": input_ids}
-
     def _do_output_past(self, outputs):
         has_output_past = hasattr(self.config, "output_past") and self.config.output_past
         has_mem_len = hasattr(self.config, "mem_len") and self.config.mem_len
@@ -785,6 +782,7 @@ class PreTrainedModel(nn.Module):
         """ Generate sequences for each example without beam search (num_beams == 1).
             All returned sequence are generated independantly.
         """
+        print("Calling no beam search")
         assert self.num_keep_best == 1, 'cannot generate >1 sentences in greedy search'
         # current position / max lengths / length of generated sentences / unfinished sentences
         unfinished_sents = []
@@ -906,6 +904,7 @@ class PreTrainedModel(nn.Module):
     ):
         """ Generate sequences for each example with beam search.
         """
+        print("Calling beam search")
         # Expand input to num beams
         input_ids = input_ids.unsqueeze(1).expand(batch_size, num_beams, cur_len)
         input_ids = input_ids.contiguous().view(batch_size * num_beams, cur_len)  # (batch_size * num_beams, cur_len)

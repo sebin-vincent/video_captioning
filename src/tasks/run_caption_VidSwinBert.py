@@ -521,9 +521,11 @@ def get_custom_args(base_config):
 
 def main(args):
     if args.do_train==False or args.do_eval==True:
+        print("Upating existing config")
         args = update_existing_config_for_inference(args) 
 
     # global training_saver
+    print(f"Device: {args.device}")
     args.device = torch.device(args.device)
     # Setup CUDA, GPU & distributed training
     dist_init(args)
@@ -563,9 +565,13 @@ def main(args):
 
     # Get Video Swin model 
     swin_model = get_swin_model(args)
-    # Get BERT and tokenizer 
+
+    # Get BERT and tokenizer
+    print("Getting bert_encoder")
     bert_model, config, tokenizer = get_bert_model(args)
+
     # build SwinBERT based on training configs
+    print("Building SwinBert from SWIN Video encoder and bert encoder")
     vl_transformer = VideoTransformer(args, config, swin_model, bert_model) 
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 

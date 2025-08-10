@@ -1823,6 +1823,8 @@ class BertForImageCaptioning(BertPreTrainedModel):
                 self.od_labels_len+self.img_seq_len+start_pos: self.od_labels_len+self.img_seq_len+end_pos,
                 :self.od_labels_len+self.img_seq_len+end_pos]
 
+        assert start_pos < 1
+
         return {'input_ids': input_ids, 'img_feats': img_feats,
             'masked_pos': masked_pos, 'attention_mask': attention_mask,
             'token_type_ids': token_type_ids, 'position_ids': position_ids,
