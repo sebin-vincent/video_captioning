@@ -406,6 +406,7 @@ def test(args, test_dataloader, model, tokenizer, predict_file):
                     "top_k": args.top_k,
                     "top_p": args.top_p,
                     "repetition_penalty": args.repetition_penalty,
+                    "no_repeat_ngram_size": args.no_repeat_ngram_size,
                     "length_penalty": args.length_penalty,
                     "num_return_sequences": args.num_return_sequences,
                     "num_keep_best": args.num_keep_best,
@@ -545,6 +546,7 @@ def get_custom_args(base_config):
     parser.add_argument('--resume_checkpoint', type=str, default='None')
     parser.add_argument('--test_video_fname', type=str, default='None')
     parser.add_argument('--text_encoder_type', type=str, default='bert', choices=['bert', 'roberta'], help="Type of text encoder to use (bert or roberta)")
+    # Add new arguments for generation parameter control
     args = base_config.parse_args()
     return args
 
