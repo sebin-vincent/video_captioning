@@ -13,7 +13,7 @@ from .additional_utils.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
 )
-from .configuration_utils import RobertaConfig
+from .modeling_utils import RobertaConfig
 from .additional_utils.masking_utils import create_bidirectional_mask, create_causal_mask
 from .additional_utils.pytorch_utils import apply_chunking_to_forward
 from .modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel

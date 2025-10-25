@@ -15,7 +15,7 @@
 # limitations under the License.
 """RoBERTa configuration"""
 
-from .additional_utils.configuration_utils import PreTrainedConfig
+from .modeling_utils import PreTrainedConfig
 from .utils import logging
 
 
@@ -107,7 +107,7 @@ class RobertaConfig(PreTrainedConfig):
         classifier_dropout=None,
         **kwargs,
     ):
-        super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+        super(RobertaConfig,self).__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size

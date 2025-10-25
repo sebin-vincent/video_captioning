@@ -96,6 +96,9 @@ class PretrainedConfig(object):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+        print("cls: ", cls)
+        print("pretrained_model_name_or_path: ", pretrained_model_name_or_path)
+        print("kwargs: ", kwargs)
         r""" Instantiate a PretrainedConfig from a pre-trained model configuration.
 
         Params:

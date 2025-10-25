@@ -40,7 +40,7 @@ def get_roberta_model(args):
             logger.info("Load partial weights for roberta layers.")
         else:
             model = model_class(config=config) # init from scratch
-            logger.info("Init model from scratch.")
+            print("Init model from scratch.")
     else:
         model = model_class.from_pretrained(args.model_name_or_path,
             from_tf=bool('.ckpt' in args.model_name_or_path), config=config)
