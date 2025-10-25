@@ -3,6 +3,9 @@ from src.utils.logger import LOGGER as logger
 
 def get_bert_model(args):
     # Load pretrained bert and tokenizer based on training configs
+
+    print("Loading BERT model...")
+    print(args)
     config_class, model_class, tokenizer_class = BertConfig, BertForImageCaptioning, BertTokenizer
     config = config_class.from_pretrained(args.config_name if args.config_name else \
             args.model_name_or_path, num_labels=2, finetuning_task='image_captioning')
