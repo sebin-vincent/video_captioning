@@ -804,8 +804,11 @@ class PreTrainedModel(nn.Module):
             iteration=iteration+1
             model_inputs = self.prepare_inputs_for_generation(input_ids, past=past)
             outputs = self(**model_inputs)
-            print(f"_generate_no_beam_search, iteration={iteration}")
-            print(outputs)
+
+            if iteration <= 1:
+                print(f"_generate_no_beam_search, iteration={iteration}")
+                print(outputs)
+
             if cur_len == 1:
                 token_len = 2 + self.od_labels_len
                 next_token_idx = 1
