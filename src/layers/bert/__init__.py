@@ -4,10 +4,7 @@ from .tokenization_utils import (PreTrainedTokenizer, clean_up_tokenization)
 
 from .modeling_bert import (BertConfig, BertModel, BertForPreTraining,
                        BertForMaskedLM, BertForNextSentencePrediction,
-                       BertForSequenceClassification, BertForMultipleChoice,
-                       BertForTokenClassification, BertForQuestionAnswering,
                        BertForImageCaptioning, BertImgForPreTraining,
-                       BertForVLGrounding, BertImgForGroundedPreTraining,
                        load_tf_weights_in_bert, BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
                        BERT_PRETRAINED_CONFIG_ARCHIVE_MAP)
 from .modeling_utils import (WEIGHTS_NAME, CONFIG_NAME, TF_WEIGHTS_NAME,
