@@ -33,7 +33,7 @@ from typing import Any, Optional, Union
 from huggingface_hub import try_to_load_from_cache
 from packaging import version
 
-from .utils import (
+from ..utils import (
     HF_MODULES_CACHE,
     TRANSFORMERS_DYNAMIC_MODULE_NAME,
     cached_file,
@@ -41,7 +41,7 @@ from .utils import (
     is_offline_mode,
     logging,
 )
-from .utils.import_utils import VersionComparison, split_package_version
+from ..utils.import_utils import VersionComparison, split_package_version
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
