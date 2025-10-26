@@ -30,21 +30,21 @@ from typing import Any, Optional, TypedDict
 
 import numpy as np
 
-from .logging import logging
+from .logging import get_logger
 from .import_utils import is_mlx_available, is_torch_available, is_torch_fx_proxy, requires
 
 
 _CAN_RECORD_REGISTRY = {}
 
 
-logger = logging.get_logger(__name__)
+logger = get_logger(__name__)
 
 _is_torch_available = False
 if is_torch_available():
     # required for @can_return_tuple decorator to work with torchdynamo
     import torch
 
-    from ..model_debugging_utils import model_addition_debugger_context
+    # from ..model_debugging_utils import model_addition_debugger_context
 
     _is_torch_available = True
 
