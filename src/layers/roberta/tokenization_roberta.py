@@ -18,6 +18,8 @@ import json
 import os
 from functools import lru_cache
 from typing import Optional
+from random import randint
+
 
 import regex as re
 
@@ -400,5 +402,9 @@ class RobertaTokenizer(PreTrainedTokenizer):
             text = " " + text
         return (text, kwargs)
 
+
+    def get_random_token(self):
+        i = randint(0, len(self.vocab))
+        return self._convert_id_to_token(i)
 
 __all__ = ["RobertaTokenizer"]
