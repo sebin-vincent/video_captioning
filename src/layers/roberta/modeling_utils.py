@@ -29,7 +29,7 @@ from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.nn import functional as F
 
-from .utils.generic import cached_path
+from .file_utils import cached_path
 
 import logging
 from src.utils.comm import is_main_process
