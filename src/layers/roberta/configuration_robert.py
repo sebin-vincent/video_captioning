@@ -15,14 +15,14 @@
 # limitations under the License.
 """RoBERTa configuration"""
 
-from .modeling_utils import PreTrainedConfig
+from .modeling_utils import PretrainedConfig
 from .utils import logging
 
 
 logger = logging.get_logger(__name__)
 
 
-class RobertaConfig(PreTrainedConfig):
+class RobertaConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`RobertaModel`] or a [`TFRobertaModel`]. It is
     used to instantiate a RoBERTa model according to the specified arguments, defining the model architecture.
