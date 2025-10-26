@@ -28,8 +28,8 @@ from .utils import logging
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {
-    "vocab_file": "models/captioning/roberta/roberta_vocab.json",
-    "merges_file": "models/captioning/roberta/roberta_merges.txt",
+    "vocab_file": "roberta_vocab.json",
+    "merges_file": "roberta_merges.txt",
 }
 
 
