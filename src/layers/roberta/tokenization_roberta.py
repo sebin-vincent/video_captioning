@@ -404,7 +404,7 @@ class RobertaTokenizer(PreTrainedTokenizer):
 
 
     def get_random_token(self):
-        i = randint(0, len(self.vocab))
+        i = randint(0, len(self.get_vocab()))
         return self._convert_id_to_token(i)
 
 __all__ = ["RobertaTokenizer"]
