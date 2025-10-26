@@ -7,4 +7,3 @@ from .modeling_roberta import (RobertaConfig, RobertaForImageCaptioning,
 from .modeling_utils import (PretrainedConfig, PreTrainedModel, prune_layer, Conv1D)
 
 from .additional_utils.tokenization_utils import (PreTrainedTokenizer)
-from .additional_utils.tokenization_utils_base import (AddedToken)

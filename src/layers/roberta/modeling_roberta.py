@@ -1,27 +1,17 @@
 """Functional interface."""
 
-from typing import Optional, Union
 
 import math
 import sys
 import torch
 import os
 import torch.nn as nn
-from collections.abc import Callable
 
 
-from .additional_utils.cache_utils import Cache, DynamicCache, EncoderDecoderCache
-from .additional_utils.modeling_outputs import (
-    BaseModelOutputWithPastAndCrossAttentions,
-    BaseModelOutputWithPoolingAndCrossAttentions,
-)
-from .modeling_utils import RobertaConfig
-from .additional_utils.masking_utils import create_bidirectional_mask, create_causal_mask
-from .additional_utils.pytorch_utils import apply_chunking_to_forward
-from .modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
-from .additional_utils.modeling_layers import GradientCheckpointingLayer
-from .additional_utils.processing_utils import Unpack
-from .utils import TransformersKwargs, auto_docstring, logging
+
+from .configuration_robert import RobertaConfig
+from .modeling_utils import  PreTrainedModel
+from .utils import  logging
 
 
 def gelu(x):

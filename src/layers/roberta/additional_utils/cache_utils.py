@@ -5,7 +5,7 @@ from typing import Any, Optional
 import torch
 
 from .configuration_utils import PreTrainedConfig
-from .utils import (
+from ..utils import (
     is_hqq_available,
     is_quanto_greater,
     is_torch_greater_or_equal,
