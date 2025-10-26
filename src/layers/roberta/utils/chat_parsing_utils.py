@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import re
 
-from transformers.utils import is_jmespath_available
+# from transformers.utils import is_jmespath_available
 
 
-if is_jmespath_available():
-    import jmespath
-else:
-    jmespath = None
+# if is_jmespath_available():
+#     import jmespath
+# else:
+#     jmespath = None
 
 
 def _parse_re_match(node_match: re.Match) -> dict | str:

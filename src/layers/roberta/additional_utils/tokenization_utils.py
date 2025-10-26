@@ -38,7 +38,7 @@ from .tokenization_utils_base import (
     TextInputPair,
     TruncationStrategy,
 )
-from .utils import PaddingStrategy, TensorType, add_end_docstrings, logging
+from ..utils import PaddingStrategy, TensorType, add_end_docstrings, logging
 
 
 logger = logging.get_logger(__name__)
