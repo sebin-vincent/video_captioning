@@ -183,6 +183,8 @@ class RobertaTokenizer(PreTrainedTokenizer):
         )
 
         # these special tokens are not part of the vocab.json, let's add them in the correct order
+        vocab_file="models/captioning/roberta/roberta_vocab.json"
+        merges_file="models/captioning/roberta/roberta_merges.txt"
 
         with open(vocab_file, encoding="utf-8") as vocab_handle:
             self.encoder = json.load(vocab_handle)
