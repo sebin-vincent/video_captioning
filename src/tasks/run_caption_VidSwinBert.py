@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
-from modeling.load_roberta import get_roberta_model
+
 pythonpath = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 print(pythonpath)
@@ -35,6 +35,7 @@ from src.utils.deepspeed import get_deepspeed_config, fp32_to_fp16
 from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
+from src.modeling.load_roberta import get_roberta_model
 from src.solver import AdamW, WarmupLinearLR
 
 from azureml.core.run import Run
