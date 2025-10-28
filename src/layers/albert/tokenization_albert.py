@@ -111,7 +111,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
     def __init__(
         self,
-        vocab_file,
+        vocab_file="models/captioning/albert/spiece.model",
         do_lower_case=True,
         remove_space=True,
         keep_accents=False,
@@ -138,10 +138,11 @@ class AlbertTokenizer(PreTrainedTokenizer):
         self.do_lower_case = do_lower_case
         self.remove_space = remove_space
         self.keep_accents = keep_accents
-        self.vocab_file = vocab_file
+        self.vocab_file = "models/captioning/albert/spiece.model"
 
         self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
-        self.sp_model.Load(vocab_file)
+
+        self.sp_model.Load("models/captioning/albert/spiece.model")
 
         super().__init__(
             do_lower_case=do_lower_case,

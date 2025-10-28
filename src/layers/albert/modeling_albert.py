@@ -4,18 +4,13 @@ import json
 import math
 import os
 import sys
-from io import open
 
 import torch
 from torch import nn
-from torch.distributions import kl_divergence, Categorical
-from torch.nn import CrossEntropyLoss, MSELoss
 import torch.nn.functional as F
 
-from torch.nn.utils.weight_norm import weight_norm
 
-from .modeling_utils import logger, prune_linear_layer, PreTrainedModel
-from .additional_utils.configuration_utils import PreTrainedConfig
+from .modeling_utils import logger, prune_linear_layer, PreTrainedModel, PretrainedConfig
 
 def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
     """ Load tf checkpoints in a pytorch model.
@@ -103,7 +98,7 @@ LayerNormClass = torch.nn.LayerNorm
 AlbertLayerNorm = torch.nn.LayerNorm
 
 
-class AlbertConfig(PreTrainedConfig):
+class AlbertConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`AlbertModel`] or a [`TFAlbertModel`]. It is used
     to instantiate an ALBERT model according to the specified arguments, defining the model architecture. Instantiating

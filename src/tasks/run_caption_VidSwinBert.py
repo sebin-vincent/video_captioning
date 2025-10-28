@@ -3,9 +3,6 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
-from src.modeling.load_albert import get_albert_model
-
-
 pythonpath = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 print(pythonpath)
@@ -39,6 +36,8 @@ from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
 from src.modeling.load_roberta import get_roberta_model
 from src.solver import AdamW, WarmupLinearLR
+from src.modeling.load_albert import get_albert_model
+
 
 from azureml.core.run import Run
 aml_run = Run.get_context()
