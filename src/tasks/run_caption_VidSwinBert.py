@@ -34,6 +34,7 @@ from src.modeling.video_captioning_e2e_vid_swin_bert import VideoTransformer
 from src.modeling.load_swin import get_swin_model, reload_pretrained_swin
 from src.modeling.load_bert import get_bert_model
 from src.solver import AdamW, WarmupLinearLR
+from torchinfo import summary
 
 from azureml.core.run import Run
 aml_run = Run.get_context()
@@ -162,6 +163,12 @@ def train(args, train_dataloader, val_dataloader, model, tokenizer, training_sav
         if args.deepspeed_fp16:
             # deepspeed does not autocast inputs
             inputs = fp32_to_fp16(inputs)
+
+        # if iteration == 1:
+        #     # Get the model summary with increased depth
+        #     print("Model Summary:")
+        #     summary(model, input_data=inputs, depth=5)
+        #     break
 
         if args.mixed_precision_method == "fairscale":
             with torch.cuda.amp.autocast(enabled=True):

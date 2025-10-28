@@ -484,65 +484,60 @@ class BertLayer(nn.Module):
         outputs = (layer_output,) + attention_outputs[1:]  # add attentions if we output them
         return outputs
 
-class TIMMVitEncoder(nn.Module):
+class BertLayerGroup(nn.Module):
     def __init__(self, config):
-        super().__init__()
-        logger.info(config)
-        from src import timm
-        logger.info('Loading network: {}'.format(config.net))
-        logger.info('pretrained: {}'.format(config.pretrained))
-        extra_param = getattr(config, 'timm_param', {})
-        model = timm.create_model(
-            config.net, pretrained=config.pretrained,
-            **extra_param,
-        )
-        self.blocks = model.blocks
-        self.patch_embed = model.patch_embed
-        self.pos_drop = model.pos_drop
-        self.pos_embed = model.pos_embed
-
+        super(BertLayerGroup, self).__init__()
+        self.layers = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+    
     def forward(self, hidden_states, attention_mask, head_mask=None,
-                encoder_history_states=None):
-        assert all(m is None for m in head_mask), 'not supported'
-        assert encoder_history_states is None, 'not supported'
+                history_state=None):
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, attention_mask, head_mask, history_state)
+        return hidden_states
 
-        for blk in self.blocks:
-            # hidden_states = blk(hidden_states)
-            hidden_states = blk(hidden_states, attention_mask)
-        return (hidden_states,)
 
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super(BertEncoder, self).__init__()
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
-        self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList([BertLayerGroup(config) for _ in range(config.num_hidden_groups)])
     
-    def set_output_attentions(self, flag):
-        for idx in range(len(self.layer)):
-            self.layer[idx].attention.self.output_attentions = flag
-        self.output_attentions = flag
+
 
     def forward(self, hidden_states, attention_mask, head_mask=None,
                 encoder_history_states=None):
         all_hidden_states = ()
         all_attentions = ()
-        for i, layer_module in enumerate(self.layer):
+
+        layers_per_group = int(self.config.num_hidden_layers / self.config.num_hidden_groups)
+
+        for i in range(self.config.num_hidden_layers):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
+            # Determine which layer group to use (shared weights)
+            group_idx = int(i / layers_per_group)
+            layer_group_module = self.layers[group_idx]
+
+            # Select history state for this layer if available
             history_state = None if encoder_history_states is None else encoder_history_states[i]
-            # layer_outputs = layer_module(
-            #         hidden_states, attention_mask, head_mask[i],
-            #         history_state)
-            layer_outputs = layer_module(
-                hidden_states, attention_mask,
+
+            # Forward through shared group
+            layer_outputs = layer_group_module(
+                hidden_states,
+                attention_mask,
                 (None if head_mask is None else head_mask[i]),
                 history_state,
             )
-            hidden_states = layer_outputs[0]
+
+            # AlbertLayerGroup returns just hidden_states, so unpack accordingly
+            hidden_states = layer_outputs
+            if isinstance(hidden_states, tuple):  # handle possible tuple from layer group
+                hidden_states = hidden_states[0]
 
             if self.output_attentions:
+                # You can adapt this depending on whether you store attentions in AlbertLayer
                 all_attentions = all_attentions + (layer_outputs[1],)
 
         outputs = (hidden_states,)
@@ -550,7 +545,7 @@ class BertEncoder(nn.Module):
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
-        return outputs  # outputs, (hidden states), (attentions)
+        return outputs
 
 
 class BertPooler(nn.Module):

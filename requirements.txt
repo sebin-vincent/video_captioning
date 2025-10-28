@@ -28,3 +28,4 @@ torchvision
 scipy
 scikit-image
 matplotlib
+torchinfo
