@@ -3,6 +3,8 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
+from modeling.load_albert import get_albert_model
+
 
 pythonpath = os.path.abspath(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -568,11 +570,11 @@ def main(args):
     swin_model = get_swin_model(args)
     # Get BERT and tokenizer 
     # bert_model, config, tokenizer = get_bert_model(args)
-    roberta_model, config, tokenizer = get_roberta_model(args)
+    albert_model, config, tokenizer = get_albert_model(args)
 
 
     # build SwinBERT based on training configs
-    vl_transformer = VideoTransformer(args, config, swin_model, roberta_model) 
+    vl_transformer = VideoTransformer(args, config, swin_model, albert_model) 
     vl_transformer.freeze_backbone(freeze=args.freeze_backbone)
 
     if args.do_eval:
