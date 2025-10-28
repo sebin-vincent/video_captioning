@@ -28,3 +28,5 @@ torchvision
 scipy
 scikit-image
 matplotlib
+sentencepiece
+httpx
