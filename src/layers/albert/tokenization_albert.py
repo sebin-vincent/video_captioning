@@ -318,4 +318,9 @@ class AlbertTokenizer(PreTrainedTokenizer):
         return (out_vocab_file,)
 
 
+
+    def get_random_token(self):
+        i = randint(0, len(self.get_vocab()))
+        return self._convert_id_to_token(i)
+
 __all__ = ["AlbertTokenizer"]
