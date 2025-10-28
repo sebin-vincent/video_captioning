@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import sys
 
-from modeling.load_albert import get_albert_model
+from src.modeling.load_albert import get_albert_model
 
 
 pythonpath = os.path.abspath(
