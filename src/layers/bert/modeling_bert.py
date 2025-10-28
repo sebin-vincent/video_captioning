@@ -485,15 +485,18 @@ class BertLayer(nn.Module):
         return outputs
 
 class BertLayerGroup(nn.Module):
-    def __init__(self, config):
-        super(BertLayerGroup, self).__init__()
-        self.layers = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
-    
-    def forward(self, hidden_states, attention_mask, head_mask=None,
-                history_state=None):
-        for layer in self.layers:
-            hidden_states = layer(hidden_states, attention_mask, head_mask, history_state)
-        return hidden_states
+    def __init__(self, config: BertConfig):
+        super().__init__()
+
+        self.bert_layers = nn.ModuleList([BertLayer(config) for _ in range(config.inner_group_num)])
+
+    def forward(
+        self, hidden_states, attention_mask, head_mask=None,
+                history_state=None,
+    ):
+       for layer_index, bert_layers in enumerate(self.bert_layers):
+            hidden_states = bert_layers(hidden_states, attention_mask,head_mask, history_state)
+       return hidden_states
 
 
 class BertEncoder(nn.Module):
@@ -502,29 +505,28 @@ class BertEncoder(nn.Module):
         self.config = config
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
-        self.layers = nn.ModuleList([BertLayerGroup(config) for _ in range(config.num_hidden_groups)])
+        self.albert_layer_groups = nn.ModuleList([BertLayerGroup(config) for _ in range(config.num_hidden_groups)])
     
-
 
     def forward(self, hidden_states, attention_mask, head_mask=None,
                 encoder_history_states=None):
         all_hidden_states = ()
         all_attentions = ()
 
+        # Step 2: Compute number of layers per group
         layers_per_group = int(self.config.num_hidden_layers / self.config.num_hidden_groups)
+        
 
         for i in range(self.config.num_hidden_layers):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            # Determine which layer group to use (shared weights)
             group_idx = int(i / layers_per_group)
-            layer_group_module = self.layers[group_idx]
+            layer_group_module = self.albert_layer_groups[group_idx]
 
-            # Select history state for this layer if available
             history_state = None if encoder_history_states is None else encoder_history_states[i]
 
-            # Forward through shared group
+            # Forward through shared layer group
             layer_outputs = layer_group_module(
                 hidden_states,
                 attention_mask,
@@ -532,20 +534,20 @@ class BertEncoder(nn.Module):
                 history_state,
             )
 
-            # AlbertLayerGroup returns just hidden_states, so unpack accordingly
-            hidden_states = layer_outputs
-            if isinstance(hidden_states, tuple):  # handle possible tuple from layer group
-                hidden_states = hidden_states[0]
+            # AlbertLayerGroup returns hidden_states (could be tuple)
+            hidden_states = layer_outputs[0]
 
             if self.output_attentions:
-                # You can adapt this depending on whether you store attentions in AlbertLayer
+                # Optional: collect attentions if you extend AlbertLayerGroup to return them
                 all_attentions = all_attentions + (layer_outputs[1],)
 
+        # Step 4: Prepare final output tuple
         outputs = (hidden_states,)
         if self.output_hidden_states:
             outputs = outputs + (all_hidden_states,)
         if self.output_attentions:
             outputs = outputs + (all_attentions,)
+
         return outputs
 
 
