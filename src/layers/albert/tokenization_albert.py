@@ -20,6 +20,7 @@ from shutil import copyfile
 from typing import Any, Optional
 
 import sentencepiece as spm
+from random import randint
 
 from .additional_utils.tokenization_utils import AddedToken, PreTrainedTokenizer
 from .utils import logging
