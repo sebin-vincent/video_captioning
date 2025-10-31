@@ -343,19 +343,20 @@ class VisionLanguageTSVDataset(object):
             caption = caption_sample
             caption_sample = None
         if self.args.add_od_labels==True:
-            # if not caption:
-            #     print(f"CRITICAL_ERROR: Found bad data at index: {idx}")
-            #     print(f"Caption value: {caption}")
-            #     print(f"Type of caption: {type(caption)}")
-            #     print("Caption Sample:",caption_sample)
+            if not caption:
+                print("If block")
+                print(f"CRITICAL_ERROR: Found bad data at index: {idx}")
+                print(f"Caption value: {caption}")
+                print(f"Type of caption: {type(caption)}")
+                print("Caption Sample:",caption_sample)
 
             example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_b=tag, text_meta=caption_sample)
         else:
-            # if not caption:
-            #     print(f"CRITICAL_ERROR: Found bad data at index: {idx}")
-            #     print(f"Caption value: {caption}")
-            #     print(f"Type of caption: {type(caption)}")
-            #     print("Caption Sample:",caption_sample)
+            if not caption:
+                print(f"CRITICAL_ERROR: Found bad data at index: {idx}")
+                print(f"Caption value: {caption}")
+                print(f"Type of caption: {type(caption)}")
+                print("Caption Sample:",caption_sample)
             example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_meta=caption_sample)
 
         # preparing outputs
