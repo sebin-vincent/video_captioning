@@ -358,6 +358,7 @@ class VisionLanguageTSVDataset(object):
                 print(f"Caption value: {caption}")
                 print(f"Type of caption: {type(caption)}")
                 print("Caption Sample:",caption_sample)
+                print("img_key:",img_key)
             example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_meta=caption_sample)
 
         # preparing outputs
