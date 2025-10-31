@@ -353,6 +353,7 @@ class VisionLanguageTSVDataset(object):
             example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_b=tag, text_meta=caption_sample)
         else:
             if not caption:
+                print("If block 2")
                 print(f"CRITICAL_ERROR: Found bad data at index: {idx}")
                 print(f"Caption value: {caption}")
                 print(f"Type of caption: {type(caption)}")
