@@ -294,6 +294,12 @@ class CaptionTensorizer(object):
             self, text_a, text_b=None, cls_token_segment_id=0,
             pad_token_segment_id=0, sequence_a_segment_id=0,
             sequence_b_segment_id=1, text_meta=None):
+        # Validate special tokens are not None
+        if self.tokenizer.cls_token is None:
+            raise ValueError("tokenizer.cls_token is None. Tokenizer must have cls_token initialized.")
+        if self.tokenizer.sep_token is None:
+            raise ValueError("tokenizer.sep_token is None. Tokenizer must have sep_token initialized.")
+        
         text_a = self.prepro_raw_txt(text_a)
         if self.is_train:
             tokens_a = self.tokenizer.tokenize(text_a)
@@ -306,6 +312,8 @@ class CaptionTensorizer(object):
                         len(text_meta['bert_attn']) == self.max_seq_a_len)
         else:
             # fake tokens to generate masks
+            if self.tokenizer.mask_token is None:
+                raise ValueError("tokenizer.mask_token is None. Tokenizer must have mask_token initialized for inference mode.")
             tokens_a = [self.tokenizer.mask_token] * (self.max_seq_a_len - 2)
         if len(tokens_a) > self.max_seq_a_len - 2:
             tokens_a = tokens_a[:(self.max_seq_a_len - 2)]
@@ -318,7 +326,11 @@ class CaptionTensorizer(object):
             # pad text_a to keep it in fixed length for better inference.
             # we do not use pos tag for text_b
             padding_a_len = self.max_seq_a_len - seq_a_len
-            tokens += [self.tokenizer.pad_token] * padding_a_len
+            # Use eos_token as fallback if pad_token is None
+            pad_token = self.tokenizer.pad_token if self.tokenizer.pad_token is not None else self.tokenizer.eos_token
+            if pad_token is None:
+                raise ValueError("Both pad_token and eos_token are None. Tokenizer must have at least one token for padding.")
+            tokens += [pad_token] * padding_a_len
             segment_ids += ([pad_token_segment_id] * padding_a_len)
 
             tokens_b = self.tokenizer.tokenize(text_b)
@@ -344,9 +356,31 @@ class CaptionTensorizer(object):
 
         # pad on the right for image captioning
         seq_padding_len = self.max_seq_len - seq_len
-        tokens = tokens_after_masking + ([self.tokenizer.pad_token] * seq_padding_len)
+        # Ensure pad_token is not None - use eos_token as fallback if pad_token is None
+        pad_token = self.tokenizer.pad_token if self.tokenizer.pad_token is not None else self.tokenizer.eos_token
+        if pad_token is None:
+            raise ValueError("Both pad_token and eos_token are None. Tokenizer must have at least one special token for padding.")
+        tokens = tokens_after_masking + ([pad_token] * seq_padding_len)
         segment_ids += ([pad_token_segment_id] * seq_padding_len)
         input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+
+        # Validate input_ids - check for None values
+        if input_ids is None:
+            raise ValueError(f"convert_tokens_to_ids returned None. tokens length: {len(tokens)}, tokens sample: {tokens[:10] if len(tokens) > 10 else tokens}")
+        
+        # Check for None values in input_ids list
+        if any(id_val is None for id_val in input_ids):
+            none_indices = [i for i, id_val in enumerate(input_ids) if id_val is None]
+            problematic_tokens = [tokens[i] for i in none_indices[:10]]  # Show first 10
+            raise ValueError(
+                f"Found None values in input_ids at indices: {none_indices[:10]}... (showing first 10). "
+                f"Problematic tokens: {problematic_tokens}. "
+                f"Tokenizer pad_token: {self.tokenizer.pad_token}, "
+                f"cls_token: {self.tokenizer.cls_token}, "
+                f"sep_token: {self.tokenizer.sep_token}, "
+                f"mask_token: {self.tokenizer.mask_token}. "
+                f"Check if special tokens are properly initialized in the tokenizer."
+            )
 
         attention_mask = self.get_attn_masks(seq_a_len, seq_len)
 

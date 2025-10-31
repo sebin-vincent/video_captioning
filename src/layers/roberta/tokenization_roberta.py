@@ -281,7 +281,17 @@ class RobertaTokenizer(PreTrainedTokenizer):
     def _convert_token_to_id(self, token):
         """Converts a token (str) in an id using the vocab."""
         tokenId=self.encoder.get(token, self.encoder.get(self.unk_token))
-        print("TokenId : ", tokenId)
+        if(tokenId is None):
+            print("Token : ", token)
+            print("TokenId : ", tokenId)
+            print("Unk token : ", self.unk_token)
+            print("Pad token : ", self.pad_token)
+            print("Eos token : ", self.eos_token)
+            print("Sep token : ", self.sep_token)
+            print("Cls token : ", self.cls_token)
+            print("Mask token : ", self.mask_token)
+            print("Bos token : ", self.bos_token)
+            print("Vocab size : ", self.vocab_size)
         return tokenId
     def _convert_id_to_token(self, index):
         """Converts an index (integer) in a token (str) using the vocab."""
@@ -406,7 +416,6 @@ class RobertaTokenizer(PreTrainedTokenizer):
 
     def get_random_token(self):
         i = randint(0, len(self.get_vocab()))
-        print("Length of vacob is=",len(self.get_vocab()))
         return self._convert_id_to_token(i)
 
 __all__ = ["RobertaTokenizer"]
