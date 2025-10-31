@@ -22,7 +22,8 @@ from typing import Any, Optional
 
 import sentencepiece as spm
 
-from .additional_utils.tokenization_utils import AddedToken, PreTrainedTokenizer
+from .additional_utils.tokenization_utils import AddedToken
+from .tokenization_utils import PreTrainedTokenizer
 from .utils import logging
 from .utils.import_utils import requires
 
@@ -321,7 +322,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
 
     def get_random_token(self):
-        i = randint(0, len(self.get_vocab()))
+        i = randint(0, len(self.vocab_size()))
         return self._convert_id_to_token(i)
 
 __all__ = ["AlbertTokenizer"]
