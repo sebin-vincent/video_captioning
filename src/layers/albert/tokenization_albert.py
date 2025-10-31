@@ -23,7 +23,7 @@ from typing import Any, Optional
 import sentencepiece as spm
 from random import randint
 
-from .additional_utils.tokenization_utils import AddedToken
+# from .additional_utils.tokenization_utils import AddedToken
 from .tokenization_utils import PreTrainedTokenizer
 from .utils import logging
 from .utils.import_utils import requires
@@ -130,11 +130,11 @@ class AlbertTokenizer(PreTrainedTokenizer):
     ) -> None:
         # Mask token behave like a normal word, i.e. include the space before it and
         # is included in the raw text, there should be a match in a non-normalized sentence.
-        mask_token = (
-            AddedToken(mask_token, lstrip=True, rstrip=False, normalized=False)
-            if isinstance(mask_token, str)
-            else mask_token
-        )
+        # mask_token = (
+        #     AddedToken(mask_token, lstrip=True, rstrip=False, normalized=False)
+        #     if isinstance(mask_token, str)
+        #     else mask_token
+        # )
 
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
 
@@ -147,7 +147,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
         self.sp_model.Load("models/captioning/albert/spiece.model")
 
-        super().__init__(
+        super(AlbertTokenizer, self).__init__(
             do_lower_case=do_lower_case,
             remove_space=remove_space,
             keep_accents=keep_accents,
