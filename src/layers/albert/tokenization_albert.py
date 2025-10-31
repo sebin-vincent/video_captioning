@@ -323,7 +323,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
 
     def get_random_token(self):
-        i = randint(0, len(self.vocab_size()))
+        i = randint(0, self.vocab_size)
         return self._convert_id_to_token(i)
 
 __all__ = ["AlbertTokenizer"]
