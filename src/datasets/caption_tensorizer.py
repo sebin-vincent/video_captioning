@@ -366,12 +366,16 @@ class CaptionTensorizer(object):
 
         # Validate input_ids - check for None values
         if input_ids is None:
+            print("img_key:",img_key)
+            print("tokens:",tokens)
             raise ValueError(f"convert_tokens_to_ids returned None. tokens length: {len(tokens)}, tokens sample: {tokens[:10] if len(tokens) > 10 else tokens}")
         
         # Check for None values in input_ids list
         if any(id_val is None for id_val in input_ids):
             none_indices = [i for i, id_val in enumerate(input_ids) if id_val is None]
-            problematic_tokens = [tokens[i] for i in none_indices[:10]]  # Show first 10
+            problematic_tokens = [tokens[i] for i in none_indices[:10]]
+            print("img_key:",img_key)  #
+            print("tokens:",tokens)
             raise ValueError(
                 f"Found None values in input_ids at indices: {none_indices[:10]}... (showing first 10). "
                 f"Problematic tokens: {problematic_tokens}. "

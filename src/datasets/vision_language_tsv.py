@@ -344,10 +344,10 @@ class VisionLanguageTSVDataset(object):
             caption_sample = None
         if self.args.add_od_labels==True:
 
-            example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_b=tag, text_meta=caption_sample)
+            example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_b=tag, text_meta=caption_sample, img_key=img_key)
         else:
 
-            example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_meta=caption_sample)
+            example = self.tensorizer.tensorize_example_e2e(caption, preproc_frames, text_meta=caption_sample, img_key=img_key)
 
         # preparing outputs
         meta_data = {}
