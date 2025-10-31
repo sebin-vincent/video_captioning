@@ -344,7 +344,7 @@ class CaptionTensorizer(object):
 
     def tensorize_example_e2e(self, text_a, img_feat, text_b=None,
             cls_token_segment_id=0, pad_token_segment_id=0,
-            sequence_a_segment_id=0, sequence_b_segment_id=1, text_meta=None):
+            sequence_a_segment_id=0, sequence_b_segment_id=1, text_meta=None, img_key=None):
         # tokenize the texts
         tokens, segment_ids, seq_a_len, seq_len = self.tokenize_text_inputs(
             text_a, text_b, cls_token_segment_id, pad_token_segment_id,
