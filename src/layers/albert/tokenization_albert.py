@@ -229,7 +229,13 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
     def _convert_id_to_token(self, index):
         """Converts an index (integer) in a token (str) using the vocab."""
-        return self.sp_model.IdToPiece(index)
+
+        try:
+            return self.sp_model.IdToPiece(index)
+        except IndexError:
+            print(f"IndexError: {index}")
+            raise IndexError(f"IndexError: {index}")
+
 
     def convert_tokens_to_string(self, tokens):
         """Converts a sequence of tokens (string) in a single string."""
@@ -323,7 +329,7 @@ class AlbertTokenizer(PreTrainedTokenizer):
 
 
     def get_random_token(self):
-        i = randint(0, self.vocab_size)
+        i = randint(0, self.vocab_size-1)
         return self._convert_id_to_token(i)
 
 __all__ = ["AlbertTokenizer"]
