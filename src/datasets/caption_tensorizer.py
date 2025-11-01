@@ -346,13 +346,13 @@ class CaptionTensorizer(object):
             cls_token_segment_id=0, pad_token_segment_id=0,
             sequence_a_segment_id=0, sequence_b_segment_id=1, text_meta=None, img_key=None):
         # tokenize the texts
-        tokens, segment_ids, seq_a_len, seq_len = self.tokenize_text_inputs(
+        tokenized_text, segment_ids, seq_a_len, seq_len = self.tokenize_text_inputs( 
             text_a, text_b, cls_token_segment_id, pad_token_segment_id,
             sequence_a_segment_id, sequence_b_segment_id, text_meta)
         
         # masking the tokens
-        tokens_after_masking, masked_pos, mlm_targets = self.mask_text_inputs(
-            tokens, seq_a_len, seq_len, text_meta)
+        tokens_after_masking, masked_pos, mlm_targets = self.mask_text_inputs( #tokens_after_masking
+            tokenized_text, seq_a_len, seq_len, text_meta)
 
         # pad on the right for image captioning
         seq_padding_len = self.max_seq_len - seq_len
@@ -360,27 +360,30 @@ class CaptionTensorizer(object):
         pad_token = self.tokenizer.pad_token if self.tokenizer.pad_token is not None else self.tokenizer.eos_token
         if pad_token is None:
             raise ValueError("Both pad_token and eos_token are None. Tokenizer must have at least one special token for padding.")
-        tokens = tokens_after_masking + ([pad_token] * seq_padding_len)
+        tokens_after_paddings = tokens_after_masking + ([pad_token] * seq_padding_len)
         segment_ids += ([pad_token_segment_id] * seq_padding_len)
-        input_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+        input_ids = self.tokenizer.convert_tokens_to_ids(tokens_after_paddings)
 
         # Validate input_ids - check for None values
         if input_ids is None:
             print("img_key:",img_key)
-            print("tokens:",tokens)
-            raise ValueError(f"convert_tokens_to_ids returned None. tokens length: {len(tokens)}, tokens sample: {tokens[:10] if len(tokens) > 10 else tokens}")
+            print("tokenized_text:",tokenized_text)
+            print("tokens after:",tokens_after_masking)
+            print("Toekns after padding:", tokens_after_paddings)
+            raise ValueError(f"convert_tokens_to_ids returned None. tokens length: {len(tokens_after_paddings)}, tokens sample: {tokens_after_paddings[:10] if len(tokens_after_paddings) > 10 else tokens_after_paddings}")
         
         # Check for None values in input_ids list
         if any(id_val is None for id_val in input_ids):
             none_indices = [i for i, id_val in enumerate(input_ids) if id_val is None]
-            problematic_tokens = [tokens[i] for i in none_indices[:10]]
+            problematic_tokens = [tokens_after_paddings[i] for i in none_indices[:10]]
             print("img_key:",img_key)  #
-            print("tokens:",tokens)
+            print("tokens:",tokens_after_paddings)
             raise ValueError(
                 f"Found None values in input_ids at indices: {none_indices[:10]}... (showing first 10). "
                 f"Problematic tokens: {problematic_tokens}. "
                 f"Tokenizer pad_token: {self.tokenizer.pad_token}, "
                 f"cls_token: {self.tokenizer.cls_token}, "
+                f"eos_toekn: {self.tokenizer.eos_toekn}"
                 f"sep_token: {self.tokenizer.sep_token}, "
                 f"mask_token: {self.tokenizer.mask_token}. "
                 f"Check if special tokens are properly initialized in the tokenizer."
