@@ -13,7 +13,7 @@
     "patch_size": 32,
     "per_gpu_eval_batch_size": 36,
     "per_gpu_train_batch_size": 36,
-    "num_workers": 10,
+    "num_workers": 0,
     "model_name_or_path": "models/captioning/bert-base-uncased/",
     "pretrained_checkpoint": "",
     "output_dir": "output/msrvtt_8frm_default",
